@@ -329,11 +329,28 @@ runs:
             '',
             'What your AI coding agents can reach in this repository, and where the gaps are.',
             'Reviewed on this runner — no source left the machine.',
+            '',
+            // The mark is served at the reserved id `_pr` and is CLAIM-FREE —
+            // no grade, no "not validated": this comment sits on a repo we have
+            // made no claim about. GitHub proxies the image through camo on
+            // every PR render, so each fetch is an inbound impression with zero
+            // egress from this runner; the link is the click.
+            //
+            // utm_*, NOT an ad-hoc query param: the site's pageview strips the
+            // raw query string by contract (PLAT-ADR-033) and forwards ONLY the
+            // closed utm_* allowlist as explicit fields — an ad-hoc `s=pr`
+            // would count structurally zero clicks forever.
+            '[![DeepSweep agent review](https://api.deepsweep.ai/v1/badge/grade/_pr)](https://deepsweep.ai/docs/ci-cd?utm_source=github&utm_medium=pr-comment)',
           ].join('\n');
           const marker = '<!-- deepsweep-review -->';
-          const { data: comments } = await github.rest.issues.listComments({
+          // PAGINATE. Unpaginated, listComments returns the FIRST 30: on a
+          // busy PR our earlier comment falls off the first page, `mine` comes
+          // back undefined, and every push appends a fresh comment — the exact
+          // wall of bot noise the update-never-append rule below exists to
+          // prevent.
+          const comments = await github.paginate(github.rest.issues.listComments, {
             owner: context.repo.owner, repo: context.repo.repo,
-            issue_number: context.issue.number,
+            issue_number: context.issue.number, per_page: 100,
           });
           const mine = comments.find(c => c.body && c.body.includes(marker));
           const payload = marker + '\n' + body;
