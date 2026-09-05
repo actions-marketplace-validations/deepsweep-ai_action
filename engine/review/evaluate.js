@@ -72,7 +72,7 @@ function atomHolds(atom, ctx) {
 function ruleEffective(rule, ctx) {
     if (!matchesAction(rule.action, ctx.action))
         return false;
-    if (!matchesResource(rule.resource, ctx.resource))
+    if (!matchesResource(rule.resource, ctx.resource) && !(ctx.resourceAliases ?? []).some((a) => matchesResource(rule.resource, a)))
         return false;
     if (!principalMatches(rule.principal, ctx))
         return false;
@@ -98,7 +98,8 @@ function compareMatched(a, b) {
 /** Single-sourced human WHY over the decision fields (Principle 5). */
 function buildExplanation(outcome, ctx, matched, decidingName) {
     const who = ctx.principal ?? "an unattributed source";
-    const what = `${ctx.action} on ${ctx.resource}`;
+    const aliases = ctx.resourceAliases ?? [];
+    const what = aliases.length === 0 ? `${ctx.action} on ${ctx.resource}` : `${ctx.action} on ${ctx.resource} [${aliases.join(", ")}]`;
     if (matched.length === 0) {
         if (outcome === "observe") {
             return `observe (default): no policy rule applies to ${what} for ${who} — recorded for review, grants nothing`;

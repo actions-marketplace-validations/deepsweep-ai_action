@@ -27,6 +27,14 @@ export function verifyEvidenceBundle(bundle, trustedKeys) {
     }
     const records = b.records;
     const claimedRoot = b.root;
+    // 0. Chain attestation. The exporter refuses to emit a bundle over a
+    // broken hash chain (TEAM-ADR-046), so a bundle that says otherwise — or
+    // omits the claim — was produced over tampered evidence or assembled by
+    // hand. Fail closed on anything but an explicit true.
+    const chainOk = b.chainIntact === true;
+    findings.push(chainOk
+        ? pass("chain", "bundle attests an intact ledger hash chain at export time")
+        : fail("chain", "bundle does not attest an intact hash chain (chainIntact !== true) — the ledger was tampered before export, or the bundle predates the export refusal gate"));
     // 3. Recompute the root from the records — the bundle's own root is a
     // claim until the records reproduce it.
     const recomputed = merkleRoot(records.map(evidenceLeafHash));
@@ -100,7 +108,14 @@ export function verifyEvidenceBundle(bundle, trustedKeys) {
     if (consistencyOk && consistency.length > 0) {
         findings.push(pass("consistency", `${consistency.length} append-only proof(s) verified`));
     }
-    const structurallyOk = rootOk && inclusionOk && consistencyOk && inclusion.length === records.length;
+    // A bundle with no consistency proof proves inclusion but NOT append-only
+    // continuity from any prior export. Legitimate for a first export (there
+    // is nothing to be consistent WITH), so this is a stated limit, never a
+    // refusal — an auditor holding a prior tree head must demand the proof.
+    if (consistency.length === 0 && records.length > 0) {
+        findings.push(pass("continuity", "no consistency proof present — inclusion is proven; append-only continuity from a prior export is not (expected only for a first export)"));
+    }
+    const structurallyOk = chainOk && rootOk && inclusionOk && consistencyOk && inclusion.length === records.length;
     return {
         verified: structurallyOk && attributed,
         attributed,

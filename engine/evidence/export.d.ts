@@ -9,8 +9,9 @@
  *    and is log R2 an append-only extension of R1?" — the property a
  *    transparency auditor, a regulator, or a court can check offline.
  *
- * Fail-closed: a malformed ledger yields a refusal bundle (status
- * "unverifiable"), never a partial or fabricated proof set.
+ * Fail-closed: a malformed ledger OR a broken hash chain yields a refusal
+ * bundle (status "unverifiable"), never a partial or fabricated proof set —
+ * and never a SIGNED tree head over edited history (TEAM-ADR-046).
  */
 import { type LedgerEntry } from "../review/ledger.js";
 import { type EvidenceRecord } from "./record.js";
@@ -40,6 +41,9 @@ export type EvidenceBundle = {
     readonly generatedAt: string;
     readonly treeSize: number;
     readonly root: Hex;
+    /** Always true on a bundle this exporter emits: a broken chain is a
+     * refusal, never an exported bundle (TEAM-ADR-046). The field stays so
+     * verifiers can fail closed on any bundle that claims otherwise. */
     readonly chainIntact: boolean;
     readonly records: readonly EvidenceRecord[];
     readonly inclusion: readonly InclusionProofExport[];
@@ -51,7 +55,15 @@ export type EvidenceBundle = {
     readonly status: "unverifiable";
     readonly reason: string;
 };
-/** Map one ledger entry to its evidence record (metadata-only by shape). */
+/**
+ * Map one ledger entry to its evidence record (metadata-only by shape).
+ *
+ * THROWS for a `review.run` entry whose payload lacks a valid
+ * `baselineSha256` (TEAM-ADR-054): the facts the record must attest are
+ * missing, and zeroing them would put a fabricated all-clear inside the one
+ * artifact whose job is to be unfabricatable. `exportEvidence` turns the
+ * throw into a refusal bundle, the TEAM-ADR-046 posture.
+ */
 export declare function recordFromLedgerEntry(entry: LedgerEntry, workspace: string): EvidenceRecord;
 export interface ExportOptions {
     readonly workspace: string;

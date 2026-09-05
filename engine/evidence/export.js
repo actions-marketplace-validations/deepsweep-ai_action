@@ -9,20 +9,44 @@
  *    and is log R2 an append-only extension of R1?" — the property a
  *    transparency auditor, a regulator, or a court can check offline.
  *
- * Fail-closed: a malformed ledger yields a refusal bundle (status
- * "unverifiable"), never a partial or fabricated proof set.
+ * Fail-closed: a malformed ledger OR a broken hash chain yields a refusal
+ * bundle (status "unverifiable"), never a partial or fabricated proof set —
+ * and never a SIGNED tree head over edited history (TEAM-ADR-046).
  */
 import { readLedger, verifyChain } from "../review/ledger.js";
-import { buildEvidenceRecord, evidenceLeafHash } from "./record.js";
+import { buildEvidenceRecord, evidenceLeafHash, } from "./record.js";
 import { signTreeHead } from "./treehead.js";
 import { consistencyProof, inclusionProof, merkleRoot, verifyConsistency, verifyInclusion, } from "./merkle.js";
-/** Map one ledger entry to its evidence record (metadata-only by shape). */
+/**
+ * Map one ledger entry to its evidence record (metadata-only by shape).
+ *
+ * THROWS for a `review.run` entry whose payload lacks a valid
+ * `baselineSha256` (TEAM-ADR-054): the facts the record must attest are
+ * missing, and zeroing them would put a fabricated all-clear inside the one
+ * artifact whose job is to be unfabricatable. `exportEvidence` turns the
+ * throw into a refusal bundle, the TEAM-ADR-046 posture.
+ */
 export function recordFromLedgerEntry(entry, workspace) {
     const p = entry.payload;
     const str = (k) => (typeof p[k] === "string" ? String(p[k]) : "");
     const num = (k) => (typeof p[k] === "number" ? Number(p[k]) : 0);
     const isDecision = entry.kind === "policy.decision";
     const outcome = str("outcome");
+    let review = null;
+    if (entry.kind === "review.run") {
+        const baselineSha256 = str("baselineSha256");
+        if (!/^[0-9a-f]{64}$/.test(baselineSha256)) {
+            throw new Error("review.run ledger entry carries no valid baselineSha256 — refusing to export a review record without the review it attests (TEAM-ADR-054)");
+        }
+        review = {
+            baselineSha256,
+            findingCount: num("findingCount"),
+            criticalCount: num("critical"),
+            highCount: num("high"),
+            capabilityCount: num("capabilities"),
+            boundaryGapCount: num("boundaryGaps"),
+        };
+    }
     return buildEvidenceRecord({
         occurredAt: entry.occurredAt,
         workspace,
@@ -33,7 +57,9 @@ export function recordFromLedgerEntry(entry, workspace) {
             ? str("rule") === "" || str("rule").startsWith("(none")
                 ? "default-effect"
                 : "rule-matched"
-            : "review-run",
+            : entry.kind === "review.run"
+                ? "review-run"
+                : "ledger-event",
         // The ledger already stores the tuple as hashes (ADR-021 privacy rule):
         // re-hashing a hash is still a stable, value-free commitment, and for
         // review.run entries the tuple slots are empty by construction.
@@ -44,6 +70,7 @@ export function recordFromLedgerEntry(entry, workspace) {
         policyMode: str("mode") === "" ? "observe" : str("mode"),
         policyLayers: [],
         matchedRuleCount: num("matchedRules"),
+        review,
     });
 }
 /**
@@ -59,8 +86,24 @@ export function exportEvidence(workspaceRoot, opts) {
             reason: "ledger.jsonl is malformed — refusing to export proofs over damaged evidence",
         };
     }
-    const chainIntact = verifyChain(entries);
-    const records = entries.map((e) => recordFromLedgerEntry(e, opts.workspace));
+    if (!verifyChain(entries)) {
+        // TEAM-ADR-046: exporting (and above all SIGNING) proofs over an edited
+        // ledger would attest tampered history — the exact over-claim the moat
+        // cannot survive. verifyLedger() names the tamper class for forensics.
+        return {
+            status: "unverifiable",
+            reason: "ledger hash chain does not verify — an entry was edited or removed; refusing to export or sign proofs over tampered evidence",
+        };
+    }
+    let records;
+    try {
+        records = entries.map((e) => recordFromLedgerEntry(e, opts.workspace));
+    }
+    catch (err) {
+        // TEAM-ADR-054: a review.run entry without the facts it must attest is a
+        // refusal, never a zeroed record — same posture as a broken chain.
+        return { status: "unverifiable", reason: err.message };
+    }
     const leaves = records.map(evidenceLeafHash);
     const root = merkleRoot(leaves);
     const limit = Math.min(opts.maxInclusion ?? leaves.length, leaves.length);
@@ -99,7 +142,7 @@ export function exportEvidence(workspaceRoot, opts) {
         generatedAt: opts.generatedAt,
         treeSize: leaves.length,
         root,
-        chainIntact,
+        chainIntact: true,
         records,
         inclusion,
         consistency,

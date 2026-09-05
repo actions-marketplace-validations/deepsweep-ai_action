@@ -9,7 +9,7 @@ export declare const MAX_REQUEST_BYTES = 1048576;
 /** Cap on the echoed correlation id (it is host-supplied, so it is bounded). */
 export declare const MAX_CORRELATION_ID_LENGTH = 128;
 /** The complete command vocabulary. Anything else is a protocol error. */
-export declare const HOST_COMMANDS: readonly ["authorize", "export", "review", "studio", "timeline", "verify"];
+export declare const HOST_COMMANDS: readonly ["authorize", "export", "packet", "review", "studio", "timeline", "verify"];
 export type HostCommand = (typeof HOST_COMMANDS)[number];
 /** One line of machine-readable help — the sidecar has no marketing surface. */
 export declare const HOST_HELP_LINE: string;

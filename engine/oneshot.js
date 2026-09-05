@@ -8,7 +8,7 @@
  *  - a drifted entity is NEVER re-pinned implicitly — pin.drift re-raises on
  *    every run until an explicit `--update-baseline`.
  */
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import { review } from "./review/engine.js";
 import { extractPins } from "./review/pins.js";
 import { diffReports } from "./review/diff.js";
@@ -21,6 +21,7 @@ import { buildAuthorizationGapView } from "./review/authgap.js";
 import { buildDecisionView } from "./review/evaluate.js";
 import { computeTrustScores } from "./review/score.js";
 import { appendLedgerEntry } from "./review/ledger.js";
+import { workspaceLabel } from "./review/workspace-label.js";
 /**
  * May throw BaselineRefusalError, IdentityRefusalError, or PolicyRefusalError
  * on `.deepsweep/` containment violations (all map to exit 3 in the CLI — the
@@ -28,7 +29,11 @@ import { appendLedgerEntry } from "./review/ledger.js";
  */
 export function runReviewOnce(workspaceRoot, opts = {}) {
     const root = resolve(workspaceRoot);
-    const workspace = basename(root);
+    // TEAM-ADR-048: the LABEL, never the basename. This one value feeds the
+    // baseline, the identity store, agentId derivation, the decision view and
+    // the review.run ledger payload — which is what the evidence bundle, the
+    // compliance packet and the Studio data island all read downstream.
+    const workspace = workspaceLabel(root);
     const nowIso = (opts.now?.() ?? new Date()).toISOString();
     const report = review(root, opts.userConfigRoot !== undefined ? { userConfigRoot: opts.userConfigRoot } : {});
     const extraction = extractPins(root);

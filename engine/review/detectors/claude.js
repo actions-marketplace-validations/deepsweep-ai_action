@@ -23,6 +23,7 @@
  */
 import { parseTolerantJson, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
+import { redactCommandLine } from "../pins.js";
 import { asRecord, asString, isBlankDocument, malformedWarning, unreadableWarning } from "./util.js";
 const CLAUDE_SETTINGS_PATHS = [".claude/settings.json", ".claude/settings.local.json"];
 /** Capability kind a deny rule constrains, or undefined (skip — see header). */
@@ -110,17 +111,26 @@ function detect(workspaceRoot) {
         // ADR-014: every hook COMMAND (PreToolUse and PostToolUse) is itself a
         // shellExecution capability — an arbitrary local command running on
         // every matching tool call. detail.hook marks these for the score's
-        // self-anchor exclusion; the command string is config the operator
-        // wrote, not a secret (sanitized at every render choke point anyway).
+        // self-anchor exclusion.
+        //
+        // This comment used to end "the command string is config the operator
+        // wrote, not a secret (sanitized at every render choke point anyway)".
+        // That was false: NOTHING sanitized it. Measured 2026-08-23, a planted
+        // bearer token on a PreToolUse hook reached review.md once, review.json
+        // four times and studio.html three times, verbatim — and review.md is
+        // the artifact hand-delivered to a client. redactCommandLine now runs at
+        // the PRODUCER, so every downstream surface inherits it rather than each
+        // render being trusted to remember.
         for (const event of ["PreToolUse", "PostToolUse"]) {
             const entries = hooks?.[event];
             for (const entry of Array.isArray(entries) ? entries : []) {
                 const matcher = asString(asRecord(entry)?.["matcher"]) ?? "";
                 const inner = asRecord(entry)?.["hooks"];
                 for (const h of Array.isArray(inner) ? inner : []) {
-                    const command = asString(asRecord(h)?.["command"]);
-                    if (command === undefined)
+                    const rawCommand = asString(asRecord(h)?.["command"]);
+                    if (rawCommand === undefined)
                         continue;
+                    const command = redactCommandLine(rawCommand);
                     out.capabilities.push({
                         kind: "shellExecution",
                         summary: `${event} hook runs a local command ("${command}") on ${matcher === "" || matcher === "*" ? "every" : `"${matcher}"`} tool call${matcher === "" || matcher === "*" ? "" : "s"}`,

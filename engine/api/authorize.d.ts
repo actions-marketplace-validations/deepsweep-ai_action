@@ -1,6 +1,8 @@
 import type { PolicyAction, PolicyMode } from "../review/policy.js";
 import type { PolicyOutcome } from "../review/evaluate.js";
 import type { EnforcementEffect } from "../review/enforce.js";
+import { type LedgerSigningKey } from "../review/ledger-sign.js";
+import { type Classification } from "../packs/bindings.js";
 export interface AuthorizeParams {
     readonly workspaceRoot: string;
     /** Neutral identifier; null = unattributed (ADR-021 "none"). */
@@ -11,6 +13,24 @@ export interface AuthorizeParams {
     readonly userConfigRoot?: string;
     /** Injected clock (determinism invariant). */
     readonly nowIso: string;
+    /**
+     * TEAM-ADR-028 per-entry signature over the decision record, when the HOST
+     * holds a key (gateway, Studio). Absent = unsigned entry, recorded honestly.
+     */
+    readonly key?: LedgerSigningKey | undefined;
+    /**
+     * TEAM-ADR-041 (optional): the MCP tool this decision is about, so installed
+     * rule packs can classify it. Classification is over the NAME (and the
+     * TEAM-ADR-039 pinned description hash when the gateway holds one) — never
+     * over arguments. Absent = no classification, pre-041 behaviour exactly.
+     */
+    readonly tool?: AuthorizeToolContext | undefined;
+}
+export interface AuthorizeToolContext {
+    readonly serverName: string;
+    readonly toolName: string;
+    /** SHA-256 the gateway pinned for this tool from tools/list, when it has one. */
+    readonly descriptionHash?: string | undefined;
 }
 /** One refused policy layer — the layer contributed ZERO rules (fail-closed). */
 export interface AuthorizeLayerRefusal {
@@ -38,6 +58,10 @@ export interface AuthorizeResult {
      * (incl. the ADR-010 safe default over a refused primary layer) · 4 deny.
      */
     readonly exitCode: 0 | 3 | 4;
+    /** TEAM-ADR-041: the pack classification of `tool`, or null (no tool given / no pack / no binding matched). */
+    readonly classification: Classification | null;
+    /** TEAM-ADR-041: `<id>@<version>#<bundleVersion>:<keyId>` for every pack that contributed rules (load order). */
+    readonly packs: readonly string[];
 }
 /** Marker used when no rule matched and the policy's defaultEffect decided. */
 export declare const DEFAULT_EFFECT_RULE_LABEL = "(none \u2014 defaultEffect)";

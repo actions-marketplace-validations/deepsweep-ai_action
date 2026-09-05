@@ -5,7 +5,7 @@ export declare const IDENTITY_REL_PATH = ".deepsweep/identity.json";
  * Agent types this build derives (ADR-005; evolves additively like
  * CapabilityKind — existing values are never renamed or re-meaning'd).
  */
-export type AgentType = "cursor" | "claude-code" | "copilot" | "windsurf" | "devcontainer";
+export type AgentType = "cursor" | "claude-code" | "copilot" | "windsurf" | "devcontainer" | "antigravity" | "trae" | "kiro";
 /**
  * Attestation levels (ADR-005 additive enum). Only `claimed` exists in v0;
  * `session-observed` (S2.3), `verified-signed` (E4), and `attested` (cloud)
@@ -37,9 +37,16 @@ export interface IdentityFile {
     schemaVersion: 1;
     /** Workspace root BASENAME only (ADR-003 rule, as in baseline.json). */
     workspace: string;
+    /**
+     * Non-secret id of the pin key the stored agentIds were derived under
+     * (TEAM-ADR-047). Under a different key the same agent derives a different
+     * id, so keeping the old records would accumulate ghosts that can never be
+     * matched again — regenerate instead, visibly.
+     */
+    pinKeyId: string;
     agents: AgentIdentityRecord[];
 }
-export type IdentityInvalidReason = "corrupt" | "unknownSchemaVersion" | "foreignWorkspace";
+export type IdentityInvalidReason = "corrupt" | "unknownSchemaVersion" | "foreignWorkspace" | "foreignPinKey";
 export type IdentityLoad = {
     status: "absent";
 } | {

@@ -107,6 +107,10 @@ export declare const ACQUISITION_CTA_IDS: {
     readonly IDE_EXTENSION: "cta-acquire-ide-extension";
     /** "Open the web Studio →" — acquires the hosted surface. */
     readonly WEB_STUDIO: "cta-acquire-web-studio";
+    /** "Get a $99 security audit →" from the IDE review panel — acquires the
+     *  web-delivered human audit offer (deepsweep.ai/audit, S1-8a). Mirrors
+     *  deepsweep-vscode src/analytics/surface.ts (vscode #171). */
+    readonly AUDIT_FROM_IDE: "cta-acquire-audit-from-ide";
 };
 export type AcquisitionCtaId = (typeof ACQUISITION_CTA_IDS)[keyof typeof ACQUISITION_CTA_IDS];
 /** The full set, for tests that sweep rendered DOM for any of them. */

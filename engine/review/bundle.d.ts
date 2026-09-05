@@ -18,10 +18,15 @@
  * numbers, and failure classes — never key material or bundle content.
  *
  * Replay protection: `bundleVersion` is a strictly-monotonic integer. A
- * verifier refuses any bundle whose version is <= the floor it is given
- * (the caller persists the high-water mark of the last ACCEPTED bundle and
- * may additionally pin a minimum in the trusted-keys config — the config
- * floor holds even if the agent-writable high-water store is destroyed).
+ * verifier refuses any bundle whose version is BELOW the floor it is given —
+ * the floor is the LOWEST ACCEPTABLE version: the last ACCEPTED bundle (the
+ * caller persists that high-water mark) or the operator's `minBundleVersion`
+ * in the trusted-keys config, whichever is higher; the config floor holds
+ * even if the agent-writable high-water store is destroyed. Re-reading the
+ * currently accepted bundle is NOT a replay (TEAM-ADR-041 amendment to
+ * ADR-016 §5: the original `<=` made every sealed policy refuse on its
+ * second load, and ADR-016's own rotation runbook — "raise minBundleVersion
+ * to that version" — only works with an inclusive floor).
  *
  * Sync API choice: the KeyObject sign/verify API (crypto.sign(null, …)) is
  * used rather than webcrypto.subtle — same Ed25519 curve, but synchronous
@@ -63,6 +68,20 @@ export type BundleVerification = {
     readonly reason: BundleRefusalReason;
     readonly detail: string;
 };
+/**
+ * Pinned trust config — the SHAPE `policy-keys.json` (ADR-016) and
+ * `pack-keys.json` (TEAM-ADR-041) share: `{ schemaVersion: 1, keys: [{keyId,
+ * publicKey}], minBundleVersion? }`. Parsed in ONE place so the two trust
+ * files can never drift in what they accept. `minBundleVersion` is the
+ * operator-managed replay floor that survives destruction of the
+ * agent-writable high-water store.
+ */
+export interface TrustConfig {
+    readonly keys: readonly TrustedKey[];
+    readonly minBundleVersion: number;
+}
+/** Parse trust-config TEXT. `"malformed"` is a typed refusal — callers must fail closed on it. */
+export declare function parseTrustConfig(text: string): TrustConfig | "malformed";
 /** Derive the pinnable key id from a public key. */
 export declare function keyIdFor(publicKey: KeyObject): string;
 /** Seal a bundle: sign its canonical bytes, attach signature + keyId. */
@@ -70,7 +89,8 @@ export declare function sealBundle(bundle: PolicyBundle, privateKey: KeyObject):
 /**
  * Verify a sealed bundle against the pinned trust set and the replay floor.
  * Total over arbitrary runtime input; EVERY failure is a typed refusal.
- * `floor` is the highest bundleVersion already accepted (0 = none yet):
- * a verified bundle must be STRICTLY newer.
+ * `floor` is the lowest acceptable bundleVersion (0 = nothing accepted yet):
+ * a verified bundle must be AT OR ABOVE it — the currently accepted bundle
+ * re-verifies; anything older is a replay.
  */
 export declare function verifyBundle(sealed: unknown, trustedKeys: readonly TrustedKey[], floor: number): BundleVerification;

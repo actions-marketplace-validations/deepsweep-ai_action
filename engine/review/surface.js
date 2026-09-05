@@ -110,6 +110,10 @@ export const ACQUISITION_CTA_IDS = {
     IDE_EXTENSION: "cta-acquire-ide-extension",
     /** "Open the web Studio →" — acquires the hosted surface. */
     WEB_STUDIO: "cta-acquire-web-studio",
+    /** "Get a $99 security audit →" from the IDE review panel — acquires the
+     *  web-delivered human audit offer (deepsweep.ai/audit, S1-8a). Mirrors
+     *  deepsweep-vscode src/analytics/surface.ts (vscode #171). */
+    AUDIT_FROM_IDE: "cta-acquire-audit-from-ide",
 };
 /** The full set, for tests that sweep rendered DOM for any of them. */
 export const ALL_ACQUISITION_CTA_IDS = Object.values(ACQUISITION_CTA_IDS);
@@ -122,6 +126,7 @@ export const ACQUISITION_CTA_ACQUIRES = {
     [ACQUISITION_CTA_IDS.DESKTOP_STUDIO_FROM_IDE]: "desktop",
     [ACQUISITION_CTA_IDS.IDE_EXTENSION]: "ide-extension",
     [ACQUISITION_CTA_IDS.WEB_STUDIO]: "web",
+    [ACQUISITION_CTA_IDS.AUDIT_FROM_IDE]: "web",
 };
 /**
  * THE RULE, as a function: a surface must not render a CTA to acquire itself.

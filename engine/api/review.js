@@ -10,7 +10,8 @@
  * Determinism (repo invariant): `nowIso` is REQUIRED and injected by the
  * caller — this module never reads an ambient clock.
  */
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
+import { workspaceLabel } from "../review/workspace-label.js";
 import { runReviewOnce } from "../oneshot.js";
 import { resolveExitCode } from "../gating.js";
 import { computeTrustScores } from "../review/score.js";
@@ -42,7 +43,7 @@ export function reviewWorkspace(params) {
         findings: result.findings,
         identityRecords: result.identityRecords,
     });
-    const workspace = basename(root);
+    const workspace = workspaceLabel(root); // TEAM-ADR-048
     const events = result.findings.map((f, i) => buildEvent(f, {
         workspace,
         seq: i + 1,

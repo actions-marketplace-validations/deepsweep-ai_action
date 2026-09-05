@@ -19,6 +19,16 @@ export interface StudioParams {
      * advertising itself.
      */
     readonly surfaceContext?: SurfaceContext;
+    /**
+     * TEAM-ADR-052 — Ed25519 PKCS8 PEM the artifact's tree head is signed with.
+     *
+     * Material, never a path: file IO stays at the composition root the operator
+     * actually pointed at a file, which keeps this module free of an
+     * IPC-reachable arbitrary-file-read oracle (the `src/api/evidence.ts`
+     * credential discipline). Absent — the true state today — the artifact is
+     * UNSIGNED and prints a refusal rather than a check it cannot fail.
+     */
+    readonly signWithPem?: string;
 }
 export interface StudioArtifact {
     /** Self-contained offline HTML. Never written by this function. */

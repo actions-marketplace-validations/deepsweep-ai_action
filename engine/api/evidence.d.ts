@@ -11,6 +11,14 @@ export interface ExportEvidenceParams {
      * consistent but UNATTRIBUTED export, which is never "verified".
      */
     readonly signWithPem?: string;
+    /**
+     * TEAM-ADR-048 — the neutral engagement label the CLIENT wants on this
+     * artifact. Absent: `DEEPSWEEP_WORKSPACE_LABEL`, then the salted-hash
+     * default. The workspace BASENAME never reaches the bundle either way. A
+     * malformed label is refused (WorkspaceLabelError), never silently
+     * replaced.
+     */
+    readonly workspaceLabel?: string;
 }
 export interface ExportEvidenceResult {
     readonly bundle: EvidenceBundle;

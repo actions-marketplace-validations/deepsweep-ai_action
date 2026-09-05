@@ -47,9 +47,6 @@ function setsEqual(a, b) {
             return false;
     return true;
 }
-function short(hash) {
-    return hash.slice(0, 12);
-}
 export function diffReports(prev, next) {
     const findings = [];
     // Capability delta (vs previous report).
@@ -127,7 +124,6 @@ export function diffReports(prev, next) {
         }
         const prevList = prevPins.get(key);
         if (prevList) {
-            const prevFirst = prevList[0];
             const prevHashes = new Set(prevList.map((e) => e.contentHash));
             if (!setsEqual(hashes, prevHashes)) {
                 findings.push({
@@ -138,7 +134,17 @@ export function diffReports(prev, next) {
                     entityHash: first.contentHash,
                     // SRC-6 citation is front-loaded so it survives the 200-char text
                     // render cap; the full explanation ships in the 512-cap JSONL event.
-                    explanation: `Agent environment changed since last review — re-review before continuing to trust it (silent re-trust [SRC-6]). Pinned ${first.entityType} "${first.logicalName}": ${short(prevFirst.contentHash)}… → ${short(first.contentHash)}…; re-pin via --update-baseline.`,
+                    // TEAM-ADR-047: the explanation carries the VERDICT, never the
+                    // digests. It used to embed a 12-hex prefix of the previous and the
+                    // new contentHash, and this string is rendered verbatim into the
+                    // shareable md/html deliverable — 48 bits is more than enough to
+                    // confirm a guess from any realistic candidate list, and the
+                    // recipient of that deliverable is precisely the party in the
+                    // threat model. A keyed digest they cannot recompute has no
+                    // verification value to them either, so publishing it was pure leak
+                    // for zero benefit. The digests stay in `entityHash` for local
+                    // correlation and in the baseline for comparison.
+                    explanation: `Agent environment changed since last review — re-review before continuing to trust it (silent re-trust [SRC-6]). Pinned ${first.entityType} "${first.logicalName}" no longer matches the definition pinned in the baseline; re-pin via --update-baseline.`,
                 });
             }
         }

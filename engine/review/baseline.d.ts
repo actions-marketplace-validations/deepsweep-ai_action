@@ -12,8 +12,14 @@ export interface BaselineFile {
     entityCount: number;
     /** Workspace-relative MCP config sources pinned. */
     reviewedSources: string[];
-    /** Raw-bytes SHA-256 per source file (cheap change detection). */
-    rawFileHashes: Record<string, string>;
+    /**
+     * Non-secret id of the pin key these contentHashes were computed under
+     * (TEAM-ADR-047). A mismatch means the digests in this file are not
+     * comparable with the ones this run produces, so the baseline is discarded
+     * and regenerated rather than diffed — comparing across keys would report
+     * every entity as drifted, which is worse than a visible reset.
+     */
+    pinKeyId: string;
     entities: PinnedEntity[];
 }
 /** Provenance disclosed on every report and watch session header (ADR-003). */
@@ -24,7 +30,7 @@ export interface BaselineProvenance {
     /** SHA-256 of the baseline file bytes, computed at read time, never stored. */
     baselineSha256: string;
 }
-export type BaselineInvalidReason = "corrupt" | "unknownSchemaVersion" | "foreignWorkspace";
+export type BaselineInvalidReason = "corrupt" | "unknownSchemaVersion" | "foreignWorkspace" | "foreignPinKey";
 export type BaselineLoad = {
     status: "absent";
 } | {
@@ -46,7 +52,7 @@ export declare class BaselineRefusalError extends Error {
  */
 export declare function loadBaseline(workspaceRoot: string): BaselineLoad;
 /** Pure construction; preserves createdAt across explicit re-pins. */
-export declare function buildBaseline(workspaceBasename: string, extraction: PinExtraction, nowIso: string, previous?: BaselineFile): BaselineFile;
+export declare function buildBaseline(workspaceLabelValue: string, extraction: PinExtraction, nowIso: string, previous?: BaselineFile): BaselineFile;
 /**
  * Atomic, contained baseline write (ADR-003 moments only: first-run creation
  * or explicit re-pin). Returns the SHA-256 of the written bytes so the watch

@@ -110,6 +110,13 @@ export function renderJsonReport(report, baseline, drift, identity, trust, autho
     return JSON.stringify({
         ...sanitizeJsonValue({
             ...report,
+            // TEAM-ADR-048: `workspaceRoot` is an ABSOLUTE path — it carries the
+            // OS username and the repo basename — and this document travels
+            // (a CI artifact, a pasted ticket attachment). The field stays
+            // PRESENT and a string so review-report.schema.json still validates
+            // the dump; it just no longer says where on whose machine the review
+            // ran. The operator already knows the path they passed in.
+            workspaceRoot: "",
             baseline,
             ...identitySection,
             ...authorizationSection,

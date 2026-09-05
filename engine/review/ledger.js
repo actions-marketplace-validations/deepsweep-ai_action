@@ -32,6 +32,72 @@ import { createPublicKey } from "node:crypto";
 import { appendStoreLine, readStoreText } from "./store.js";
 export const LEDGER_FILE = "ledger.jsonl";
 export const GENESIS_PREV = "0".repeat(64);
+/**
+ * Payload keys withheld from every PUBLISHED projection of a ledger entry
+ * (TEAM-ADR-048).
+ *
+ * `workspace` is here because the review.run payload is the ROOT PRODUCER of
+ * the workspace value: the evidence exporter reads it back for a record's
+ * `resourceHash`, the compliance packet copies the payload into every
+ * timeline row, and the Studio data island ships the rows verbatim. New
+ * entries carry the LABEL (oneshot.ts writes `workspaceLabel(root)`), so this
+ * withholding is not what closes the disclosure — it is what closes it for
+ * entries ALREADY on disk. The ledger is append-only and hash-chained:
+ * history written before TEAM-ADR-048 holds a cleartext basename that can
+ * never be rewritten, so it has to be dropped where it would be emitted.
+ *
+ * The row still carries `entryHash`, which stays the entry's binding
+ * reference; a projection was never byte-equal to the payload preimage.
+ */
+export const WITHHELD_PAYLOAD_KEYS = new Set(["workspace"]);
+/**
+ * TEAM-ADR-047 §4 / TEAM-ADR-052 — the ONE oracle-withholding rule.
+ *
+ * `argsHash` and `resultHash` are UNKEYED SHA-256 over the raw, unredacted
+ * tool arguments and result. They stay unkeyed on purpose (evidence-format.md
+ * publishes them as a third-party recompute contract, and selective disclosure
+ * recomputes them from the customer's own plaintext), so the disclosure
+ * boundary is EMISSION: the digest is emitted only for a field the customer
+ * CHOSE to disclose, where the preimage is already in the reader's hands and
+ * the digest is the thing that proves it. On every other row a guessable
+ * preimage ({"path":"/etc/passwd"}, "", "ok") is confirmable on the first try.
+ *
+ * This map and this function are the whole rule. The compliance packet passes
+ * the row's VERIFIED disclosed fields; the Studio passes nothing, because a
+ * `.deepsweep/studio.html` carries no disclosures at all — so both digests are
+ * always withheld there. A second copy of this rule is a rule that can
+ * disagree with itself, which is how `resultHash` was already missed once.
+ */
+export const ORACLE_DIGEST_KEY_BY_FIELD = new Map([
+    ["args", "argsHash"],
+    ["result", "resultHash"],
+]);
+/** The payload keys an emitter must withhold, given the fields disclosed on
+ * this row. Pass an empty iterable for an artifact that carries no
+ * disclosures — every oracle digest is then withheld. */
+export function oracleWithheldKeys(disclosedFields) {
+    const disclosed = new Set(disclosedFields);
+    const withheld = new Set();
+    for (const [field, key] of ORACLE_DIGEST_KEY_BY_FIELD) {
+        if (!disclosed.has(field))
+            withheld.add(key);
+    }
+    return withheld;
+}
+/**
+ * Project one entry for publication. Pure; the on-disk entry is untouched.
+ * `extraWithheld` lets a caller withhold more for its own artifact — both
+ * published emitters pass `oracleWithheldKeys(...)` (the compliance packet
+ * timeline and the Studio data island).
+ */
+export function redactLedgerEntry(entry, extraWithheld = new Set()) {
+    const payload = {};
+    for (const [k, v] of Object.entries(entry.payload)) {
+        if (!WITHHELD_PAYLOAD_KEYS.has(k) && !extraWithheld.has(k))
+            payload[k] = v;
+    }
+    return { ...entry, payload };
+}
 export class LedgerRefusalError extends Error {
     constructor(reason) {
         super(`ledger refused: ${reason}`);
@@ -39,7 +105,7 @@ export class LedgerRefusalError extends Error {
     }
 }
 const refuse = (reason) => new LedgerRefusalError(reason);
-function hashEntry(entry) {
+export function hashEntry(entry) {
     return sha256Hex(canonicalize(entry));
 }
 /** Parse + structurally validate the ledger file. Malformed → undefined. */
