@@ -1,25 +1,6 @@
-/**
- * Local review baseline — persistence per ADR-003.
- *  - Single metadata-only JSON file at .deepsweep/baseline.json in the
- *    workspace root; machine-local; recommended for gitignore (Review never
- *    mutates user files, so nothing writes the entry); format is designed to
- *    be safe to commit (redacted, path-free, basename-only workspace id).
- *  - Written at exactly two moments: first-run creation, and explicit re-pin
- *    via --update-baseline. Never implicitly, never on watch shutdown.
- *  - Regenerate-not-migrate: unknown/newer/corrupt schemaVersion or a foreign
- *    workspace basename discards and regenerates (warning severity when a
- *    baseline previously existed; info only on true first-run creation).
- *  - Containment (extends ADR-002 to writes): refuse if .deepsweep/ or
- *    baseline.json is a symlink or its realpath escapes the workspace root;
- *    atomic write via O_CREAT|O_EXCL mode-0600 temp file inside .deepsweep/
- *    (same filesystem → atomic rename); reads enforce realpath containment,
- *    regular-file check, and the MAX_FILE_BYTES cap. The containment/write
- *    primitives live in store.ts (extracted in S2.1 so the identity store
- *    reuses the same audited code); behavior here is byte-identical to the
- *    pre-extraction implementation.
- */
-import { basename, resolve } from "node:path";
+import { workspaceLabel } from "./workspace-label.js";
 import { sha256Hex } from "./canonical.js";
+import { resolvePinKey, sameKeyId } from "./pinkey.js";
 import { readStoreText, STORE_DIR, writeStoreAtomic } from "./store.js";
 import { countNoun } from "./text.js";
 export const BASELINE_DIR = STORE_DIR;
@@ -72,16 +53,23 @@ export function loadBaseline(workspaceRoot) {
     const r = parsed;
     if (r["schemaVersion"] !== 1)
         return { status: "invalid", reason: "unknownSchemaVersion" };
-    if (typeof r["workspace"] !== "string" || r["workspace"] !== basename(resolve(workspaceRoot))) {
+    if (typeof r["workspace"] !== "string" || r["workspace"] !== workspaceLabel(workspaceRoot)) {
         return { status: "invalid", reason: "foreignWorkspace" };
+    }
+    // TEAM-ADR-047: pins are keyed, so a baseline written under another key
+    // (another machine, a rotated key, a run with no durable key store) holds
+    // digests that are not comparable with this run's. Regenerate-not-migrate,
+    // exactly as for a foreign workspace. A pre-TEAM-ADR-047 baseline has no
+    // pinKeyId and lands here too — its unkeyed digests must never be diffed
+    // against keyed ones.
+    if (typeof r["pinKeyId"] !== "string" || !sameKeyId(r["pinKeyId"], resolvePinKey().keyId)) {
+        return { status: "invalid", reason: "foreignPinKey" };
     }
     const entities = r["entities"];
     if (typeof r["createdAt"] !== "string" ||
         typeof r["lastPinnedAt"] !== "string" ||
         typeof r["entityCount"] !== "number" ||
         !isStringArray(r["reviewedSources"]) ||
-        typeof r["rawFileHashes"] !== "object" ||
-        r["rawFileHashes"] === null ||
         !Array.isArray(entities) ||
         !entities.every(isPinnedEntity)) {
         return { status: "invalid", reason: "corrupt" };
@@ -89,15 +77,15 @@ export function loadBaseline(workspaceRoot) {
     return { status: "ok", baseline: r, fileHash };
 }
 /** Pure construction; preserves createdAt across explicit re-pins. */
-export function buildBaseline(workspaceBasename, extraction, nowIso, previous) {
+export function buildBaseline(workspaceLabelValue, extraction, nowIso, previous) {
     return {
         schemaVersion: 1,
-        workspace: workspaceBasename,
+        workspace: workspaceLabelValue,
         createdAt: previous?.createdAt ?? nowIso,
         lastPinnedAt: nowIso,
         entityCount: extraction.entities.length,
         reviewedSources: extraction.sources,
-        rawFileHashes: extraction.rawFileHashes,
+        pinKeyId: extraction.pinKeyId,
         entities: extraction.entities,
     };
 }

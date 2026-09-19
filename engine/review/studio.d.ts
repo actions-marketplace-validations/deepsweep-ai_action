@@ -18,16 +18,24 @@
  *    renderer; interaction script is STATIC (no interpolation inside the
  *    <script> beyond one JSON.stringify → escaped data island).
  *  - Client-side interactions are real: screen tabs, audit filters, matrix
- *    cell selection building an ADR-021 policy draft, WebCrypto SHA-256
- *    re-verification of the EMBEDDED ledger snapshot (labeled as such),
- *    and JSON export of the embedded report. Buttons that would need a
- *    daemon (re-run review) are honest: they show the exact CLI command.
+ *    cell selection building an ADR-021 policy draft, WebCrypto RFC 6962
+ *    INCLUSION verification of every embedded row against a SIGNED tree head
+ *    (TEAM-ADR-052 — never the file against itself), and JSON export of the
+ *    embedded report. Buttons that would need a daemon (re-run review) are
+ *    honest: they show the exact CLI command.
+ *  - A CHECK THAT CANNOT FAIL IS NOT A CHECK. The verifier used to re-hash
+ *    each row's payload and re-link `prevHash` — a property any editor of the
+ *    file can restore after altering a row, and one a genuine (redacted)
+ *    projection could not satisfy at all. It now verifies inclusion under a
+ *    root signed by a key that is not what makes it trustworthy, and when
+ *    there is no signed root it says so instead of claiming anything.
  */
 import type { AgentIdentityRecord } from "./identity.js";
 import type { AgentTrustScore } from "./score.js";
 import type { ReviewReport } from "./types.js";
 import type { DriftFinding } from "./diff.js";
 import type { LedgerEntry } from "./ledger.js";
+import { type StudioEvidenceResult } from "./studio-evidence.js";
 import type { PolicyLayer, PolicyMode } from "./policy.js";
 import { type SurfaceContext } from "./surface.js";
 export declare const STUDIO_FILE = "studio.html";
@@ -73,6 +81,14 @@ export interface StudioInput {
      * only ever cause a MISSING acquisition CTA, never a self-advertisement.
      */
     surfaceContext?: SurfaceContext;
+    /**
+     * TEAM-ADR-052 — the commitment the embedded verifier checks against, built
+     * by `buildStudioEvidence`. Optional at the type level so a host that has
+     * not been taught to supply it still compiles; it then defaults to the
+     * UNSIGNED state, which prints a refusal. A missing commitment can only ever
+     * cause LESS to be claimed, never more.
+     */
+    evidence?: StudioEvidenceResult;
 }
 /** The one sanctioned render call for the Studio artifact (S1.9). */
 export declare function renderStudio(input: StudioInput): string;

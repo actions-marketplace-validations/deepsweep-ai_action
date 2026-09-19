@@ -1,4 +1,6 @@
 import { POSTURE_ASSURANCE_NOTE, qualifiedPostureLine } from "./score.js";
+import { oracleWithheldKeys, redactLedgerEntry } from "./ledger.js";
+import { STUDIO_UNSIGNED_NOTE } from "./studio-evidence.js";
 import { sanitizeField, sanitizeJsonValue } from "./sanitize.js";
 import { AGENTIC_IDE_MARKS, BIG_TECH_MARKS, DEEPSWEEP_LOGO_SVG } from "./studio-assets.js";
 import { ACQUISITION_CTA_IDS, mayRenderAcquisitionCta, NO_ANCHOR_COPY, UPDATE_STATUS_COPY, } from "./surface.js";
@@ -18,6 +20,10 @@ export const STUDIO_REVEAL_DEEPLINK = "deepsweep://studio/open";
 /** The resolved surface for this render. One accessor, one default. */
 function surfaceOf(input) {
     return input.surfaceContext?.surface ?? "web";
+}
+/** The commitment state for this render. One accessor, one fail-closed default. */
+function evidenceOf(input) {
+    return input.evidence ?? { status: "unsigned", reason: "no-signing-key" };
 }
 function esc(value) {
     return sanitizeField(value)
@@ -170,35 +176,76 @@ const STUDIO_JS = String.raw `
       post("/api/apply-policy", draft, "apply-status", function () { location.reload(); });
     });
   }
-  var verify = document.getElementById("verify-chain");
+  var verify = document.getElementById("verify-inclusion");
   if (verify) verify.addEventListener("click", function () {
     var out = document.getElementById("verify-result");
+    var PASS = "#8fc7a2", WARN = "#dcb475", FAIL = "#e28f88";
+    var HEX64 = /^[0-9a-f]{64}$/;
     var enc = new TextEncoder();
+    function say(text, color) { out.textContent = text; out.style.color = color; }
+    function hexToBytes(h) { var u = new Uint8Array(h.length / 2); for (var i = 0; i < u.length; i++) u[i] = parseInt(h.substr(i * 2, 2), 16); return u; }
+    function toHex(b) { return Array.prototype.map.call(new Uint8Array(b), function (x) { return x.toString(16).padStart(2, "0"); }).join(""); }
+    function b64ToBytes(s) { var bin = atob(s); var u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+    function digest(bytes) { return crypto.subtle.digest("SHA-256", bytes).then(toHex); }
     function canon(v) {
       if (Array.isArray(v)) return "[" + v.map(canon).join(",") + "]";
       if (v && typeof v === "object") return "{" + Object.keys(v).sort().map(function (k) { return JSON.stringify(k) + ":" + canon(v[k]); }).join(",") + "}";
       return JSON.stringify(v);
     }
-    function sha(text) {
-      return crypto.subtle.digest("SHA-256", enc.encode(text)).then(function (buf) {
-        return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
-      });
+    // RFC 6962 domain separation: leaf = SHA-256(0x00 || d), node = SHA-256(0x01 || l || r).
+    function leafHash(h) { var m = new Uint8Array(33); m[0] = 0; m.set(hexToBytes(h), 1); return digest(m); }
+    function nodeHash(l, r) { var m = new Uint8Array(65); m[0] = 1; m.set(hexToBytes(l), 1); m.set(hexToBytes(r), 33); return digest(m); }
+    function bitLength(x) { var n = 0; while (x > 0) { x >>>= 1; n++; } return n; }
+    function onesCount(x) { var n = 0; while (x > 0) { n += x & 1; x >>>= 1; } return n; }
+    async function rootFrom(leaf, index, size, proof) {
+      var inner = bitLength(index ^ (size - 1));
+      var border = onesCount(index >>> inner);
+      if (proof.length !== inner + border) return null;
+      var res = leaf, i;
+      for (i = 0; i < inner; i++) res = ((index >>> i) & 1) === 0 ? await nodeHash(res, proof[i]) : await nodeHash(proof[i], res);
+      for (i = inner; i < proof.length; i++) res = await nodeHash(proof[i], res);
+      return res;
     }
-    var entries = data.ledger || [];
-    var prev = "0".repeat(64);
-    var i = 0;
-    function step() {
-      if (i >= entries.length) { out.textContent = "[PASS] " + entries.length + " embedded entries re-hashed in your browser — chain intact"; out.style.color = "#8fc7a2"; return; }
-      var e = entries[i];
-      var body = { seq: e.seq, prevHash: e.prevHash, occurredAt: e.occurredAt, kind: e.kind, payload: e.payload };
-      sha(canon(body)).then(function (h) {
-        if (e.prevHash !== prev || h !== e.entryHash) { out.textContent = "[FAIL] chain breaks at entry " + e.seq; out.style.color = "#e28f88"; return; }
-        prev = e.entryHash; i++; step();
-      });
+    async function run() {
+      var ev = data.evidence;
+      if (!ev) return { text: "[WARN] " + data.unsignedNote, color: WARN };
+      var env = ev.signedTreeHead || {};
+      var head = env.treeHead || {};
+      if (!HEX64.test(head.rootHash) || !Number.isInteger(head.treeSize) || head.treeSize <= 0 ||
+          typeof env.signature !== "string" || typeof env.keyId !== "string" || typeof ev.publicKey !== "string") {
+        return { text: "[FAIL] this file's signed tree head is not a usable envelope — refusing (fail closed)", color: FAIL };
+      }
+      // The key id is DERIVED from the embedded key bytes; the envelope's own
+      // claim about which key signed it is never taken on faith.
+      var derived = "dsk_" + (await digest(enc.encode(ev.publicKey))).slice(0, 16);
+      if (derived !== env.keyId) return { text: "[FAIL] the embedded key does not derive key id " + env.keyId + " — refusing", color: FAIL };
+      if (head.logId !== env.keyId) return { text: "[FAIL] the head names log " + head.logId + " but is signed by " + env.keyId + " — refusing", color: FAIL };
+      var key;
+      try { key = await crypto.subtle.importKey("spki", b64ToBytes(ev.publicKey), { name: "Ed25519" }, false, ["verify"]); }
+      catch (e) { return { text: "[WARN] this browser cannot check Ed25519 signatures, so NOTHING here was verified — use a browser with Ed25519 Web Crypto, or verify the signed evidence export offline", color: WARN }; }
+      var sigOk = false;
+      try { sigOk = await crypto.subtle.verify("Ed25519", key, b64ToBytes(env.signature), enc.encode(canon(head))); } catch (e) { sigOk = false; }
+      if (!sigOk) return { text: "[FAIL] the tree head does not verify under " + env.keyId + " — this root is not the one that key signed", color: FAIL };
+      var rows = data.ledger || [];
+      var proofs = ev.inclusion || [];
+      if (rows.length === 0) return { text: "[WARN] no embedded entries to verify", color: WARN };
+      if (proofs.length !== rows.length) return { text: "[FAIL] " + rows.length + " embedded rows carry " + proofs.length + " inclusion proofs — refusing", color: FAIL };
+      for (var i = 0; i < rows.length; i++) {
+        var p = proofs[i], row = rows[i];
+        if (!p || p.index !== i || p.entryHash !== row.entryHash || p.treeSize !== head.treeSize || !Array.isArray(p.proof)) {
+          return { text: "[FAIL] entry " + row.seq + " carries a proof for a different entry or a different log — refusing", color: FAIL };
+        }
+        if (!HEX64.test(row.entryHash) || !p.proof.every(function (h) { return HEX64.test(h); })) {
+          return { text: "[FAIL] entry " + row.seq + " carries non-sha256 proof material — refusing (fail closed)", color: FAIL };
+        }
+        if ((await rootFrom(await leafHash(row.entryHash), i, head.treeSize, p.proof)) !== head.rootHash) {
+          return { text: "[FAIL] entry " + row.seq + " is not in the log this key signed — its audit path does not reproduce root " + head.rootHash.slice(0, 12), color: FAIL };
+        }
+      }
+      return { text: "[PASS] " + rows.length + " of " + head.treeSize + " entries verified for inclusion in the log signed by " + env.keyId + " · root " + head.rootHash.slice(0, 12), color: PASS };
     }
-    if (entries.length === 0) { out.textContent = "[WARN] no embedded entries to verify"; out.style.color = "#dcb475"; return; }
-    out.textContent = "verifying…";
-    step();
+    say("verifying…", "");
+    run().then(function (r) { say(r.text, r.color); });
   });
 })();
 `;
@@ -233,6 +280,21 @@ function acquisitionCta(id, surface, href, label) {
  *  - ide-extension → "Reveal in Studio →" if the desktop app is installed,
  *                    otherwise the acquisition CTA that offers to install it
  */
+/**
+ * TEAM-ADR-048 — the ONE gate on the absolute workspace path.
+ *
+ * `workspaceRoot` is an absolute path: it carries the OS username and the
+ * repo basename, which is a strictly worse disclosure than the basename the
+ * founder ruled on. The LIVE Studio (`serve`) is a page in the operator's own
+ * browser and never becomes a file; the STATIC artifact is
+ * `.deepsweep/studio.html`, a file that travels. Every interpolation of the
+ * root routes through here, so the written artifact is portable and
+ * path-free, and deleting this function changes the rendered DOM (the
+ * snapshot tests fail) rather than silently restoring the leak.
+ */
+function liveRoot(input) {
+    return input.serve !== undefined ? input.workspaceRoot : "";
+}
 function railSurfaceSlot(input) {
     const ctx = input.surfaceContext;
     const surface = surfaceOf(input);
@@ -256,7 +318,7 @@ function railSurfaceSlot(input) {
         // "Reveal in Studio →" is NAVIGATION into an app the user already has —
         // deliberately NOT in ACQUISITION_CTA_IDS and so deliberately not guarded.
         return ctx?.desktopDetected === true
-            ? `<a class="btn btn-ghost" data-cta-id="cta-reveal-in-studio" data-cta-kind="navigation" data-surface="${surface}" style="${RAIL_LINK_STYLE}" href="${STUDIO_REVEAL_DEEPLINK}?root=${encodeURIComponent(esc(input.workspaceRoot))}">Reveal in Studio →</a>`
+            ? `<a class="btn btn-ghost" data-cta-id="cta-reveal-in-studio" data-cta-kind="navigation" data-surface="${surface}" style="${RAIL_LINK_STYLE}" href="${STUDIO_REVEAL_DEEPLINK}?root=${encodeURIComponent(esc(liveRoot(input)))}">Reveal in Studio →</a>`
             : acquisitionCta(ACQUISITION_CTA_IDS.DESKTOP_STUDIO_FROM_IDE, surface, STUDIO_DOWNLOAD_URL, "Open Governance Studio →");
     }
     return acquisitionCta(ACQUISITION_CTA_IDS.DESKTOP_STUDIO, surface, STUDIO_DOWNLOAD_URL, "Get the desktop Studio →");
@@ -272,11 +334,11 @@ function sidebar(input, active) {
   <div style="display:flex;flex-direction:column;gap:2px;padding:0 8px">${nav("review", "Review")}${nav("authorize", "Authorize")}${nav("audit", "Audit")}</div>
   <div style="margin-top:auto;padding:14px 16px 0;display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--color-divider)">
     <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-500)"><span>Policy</span><span class="mono">${esc(input.layersLoaded.join("+") || "none")} · ${esc(input.mode)}</span></div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-500)"><span>Ledger</span><span class="mono" style="color:${input.chainVerified ? "#8fc7a2" : "#e28f88"}">${input.chainVerified ? "[PASS]" : "[FAIL]"}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-500)"><span>Chain (as recorded)</span><span class="mono" style="color:${input.chainVerified ? "var(--color-neutral-500)" : "#e28f88"}">${input.chainVerified ? "[PASS]" : "[FAIL]"}</span></div>
     <!-- UNTOUCHED (TEAM-ADR-030 rule 3): DeepSweep GOVERNS Cursor, it does
          not compete with it. This deeplink is correct on every surface and is
          deliberately not an acquisition CTA. -->
-    <a class="btn btn-ghost" style="font-size:12px;justify-content:flex-start;padding:2px 0" href="cursor://file/${esc(input.workspaceRoot)}">Open in Cursor →</a>
+    <a class="btn btn-ghost" style="font-size:12px;justify-content:flex-start;padding:2px 0" href="cursor://file/${esc(liveRoot(input))}">Open in Cursor →</a>
     ${railSurfaceSlot(input)}
   </div>
 </div>`;
@@ -304,7 +366,7 @@ function reviewScreen(input) {
         ? `<button class="btn btn-primary" id="rerun-live">Re-run review</button>`
         : // TEAM-ADR-027: a static artifact re-runs by opening this workspace in
             // the Governance Studio — never by pasting a terminal command.
-            `<button class="btn btn-primary" data-copy="workspace-path">Copy workspace path</button><span id="workspace-path" hidden>${esc(input.workspaceRoot)}</span>`}</div></div>
+            `<button class="btn btn-primary" data-copy="workspace-path">Copy workspace label</button><span id="workspace-path" hidden>${esc(input.workspace)}</span>`}</div></div>
   <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr 1.3fr;gap:12px">
     <div class="card"><div class="card-kicker">Boundary gaps</div><div style="font-size:24px;font-weight:500;color:${report.totals.critical > 0 ? "#e28f88" : "#8fc7a2"}">${report.totals.boundaryGaps}</div><div class="card-meta">${report.totals.critical} critical · ${report.totals.high} high</div></div>
     <div class="card"><div class="card-kicker">Capabilities</div><div style="font-size:24px;font-weight:500">${report.totals.capabilities}</div><div class="card-meta">across ${input.identity.length} agent(s)</div></div>
@@ -348,6 +410,25 @@ function authorizeScreen(input) {
         : ""}</div></div>
   </div></section>`;
 }
+/**
+ * TEAM-ADR-052 — the commitment line, rendered STATICALLY so a reader who
+ * never presses the button still learns what this file can and cannot prove.
+ *
+ * Both branches state a limit, because both have one. The signed branch names
+ * the two residuals in the artifact itself (the key travels in the file; a
+ * withheld payload key means a row's displayed values are not re-derivable
+ * from the hash that IS committed). The unsigned branch — the true case until
+ * the Ed25519 ceremony happens — prints a refusal and nothing a reader could
+ * take as authenticity.
+ */
+function commitmentLine(input) {
+    const ev = evidenceOf(input);
+    if (ev.status === "unsigned") {
+        return `<div style="font-size:11.5px;color:#dcb475">[WARN] ${STUDIO_UNSIGNED_NOTE[ev.reason]}</div>`;
+    }
+    const head = ev.evidence.signedTreeHead.treeHead;
+    return `<div style="font-size:11.5px;color:var(--color-neutral-500)">Committed root <span class="mono">${head.rootHash.slice(0, 12)}</span> at size ${head.treeSize}, signed <span class="mono">${esc(head.signedAt)}</span> by key <span class="mono">${head.logId}</span>. THIS FILE CANNOT PROVE IT IS THE WHOLE LOG: a head this key genuinely signed EARLIER, presented with only the rows it covers, verifies exactly as green as a current one — so a later entry can be omitted without any failure here. Check the size and date above against the log's anchored head registry; a size smaller than the registry's means rows are missing from this file. Inclusion binds each entry's HASH: a payload key withheld from this projection is not re-derivable from that hash here, so compare a disclosed value against the signed evidence export. The key travels in this file so the check runs offline — it is what is being checked, not why to believe it; compare that key id against the one you already hold.</div>`;
+}
 function auditScreen(input) {
     const entries = input.ledger ?? [];
     const rows = [...entries]
@@ -368,8 +449,9 @@ function auditScreen(input) {
         .join("");
     const decisions = entries.filter((e) => e.kind === "policy.decision").length;
     return `<section class="screen" id="screen-audit" style="flex:1;min-width:0;padding:26px 30px;flex-direction:column;gap:16px;overflow:auto">
-  <div style="display:flex;align-items:flex-start;gap:16px"><div><h4>Audit ledger</h4><div style="font-size:12.5px;color:var(--color-neutral-500)">${entries.length} entries · hash-chained locally · on-disk chain <span class="mono" style="color:${input.chainVerified ? "#8fc7a2" : "#e28f88"}">${input.chainVerified ? "[PASS]" : "[FAIL]"}</span> · privacy: decision tuples are stored as hashes, never values</div></div>
-  <div style="margin-left:auto;display:flex;align-items:center;gap:8px"><span id="verify-result" class="mono" style="font-size:11.5px;color:var(--color-neutral-500)"></span><button class="btn btn-ghost" id="verify-chain">Verify embedded snapshot in-browser</button></div></div>
+  <div style="display:flex;align-items:flex-start;gap:16px"><div><h4>Audit ledger</h4><div style="font-size:12.5px;color:var(--color-neutral-500)">${entries.length} entries · hash-chained locally · on-disk chain when this file was written <span class="mono" style="color:${input.chainVerified ? "var(--color-neutral-500)" : "#e28f88"}">${input.chainVerified ? "[PASS]" : "[FAIL]"}</span> — recorded by the tool, not checked by you here · privacy: decision tuples are stored as hashes, never values</div></div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px"><span id="verify-result" class="mono" style="font-size:11.5px;color:var(--color-neutral-500)"></span><button class="btn btn-ghost" id="verify-inclusion">Verify inclusion in-browser</button></div></div>
+  ${commitmentLine(input)}
   <div style="display:flex;align-items:center;gap:12px"><span class="seg"><button class="seg-opt" data-audit-filter="all" aria-pressed="true">All</button><button class="seg-opt" data-audit-filter="review.run" aria-pressed="false">Reviews</button><button class="seg-opt" data-audit-filter="policy.decision" aria-pressed="false">Decisions</button></span><span class="tag tag-neutral">${decisions} decisions recorded</span><span style="margin-left:auto;font-size:11.5px;color:var(--color-neutral-600)">Showing newest ${Math.min(entries.length, 50)} of ${entries.length}</span></div>
   <div style="flex:1;min-height:0"><table class="table" style="font-size:13px"><thead><tr><th style="width:56px">Entry</th><th style="width:200px">Recorded</th><th style="width:150px">Kind</th><th style="width:110px">Outcome</th><th>Rule</th><th style="width:110px">Hash</th></tr></thead><tbody>${rows || `<tr><td colspan="6" style="color:${input.ledger === undefined ? "#e28f88" : "var(--color-neutral-500)"}">${input.ledger === undefined ? "[FAIL] Ledger on disk is malformed — appends are refused so the damage stays verifiable against your latest anchor." : "No entries yet — run a review or an authorize decision to start the chain."}</td></tr>`}</tbody></table></div></section>`;
 }
@@ -403,10 +485,27 @@ export function renderStudio(input) {
     // strip set) then script-context escaping ONLY (esc()'s per-field 512
     // cap would truncate the JSON wholesale — caught in review; the island
     // is one big string, so field-level capping happens INSIDE the walk).
+    // TEAM-ADR-048: `report.workspaceRoot` is an ABSOLUTE path and this island
+    // is what the "Export JSON" button hands the viewer as a downloadable file.
+    // The field stays PRESENT and a string so review-report.schema.json still
+    // validates the exported document — it just no longer says where on whose
+    // machine the review ran. The ledger rows carry the workspace LABEL now
+    // (the review.run payload is written from workspaceLabel()); any entry
+    // written before TEAM-ADR-048 is redacted here at the emission boundary.
+    // TEAM-ADR-052 (issue #65, Studio half): `argsHash`/`resultHash` are UNKEYED
+    // SHA-256 over the raw args and result. This island carries no disclosures at
+    // all, so under the ONE emission rule (`oracleWithheldKeys`, shared with the
+    // compliance packet) both digests are always withheld here. Withholding used
+    // to be impossible because the embedded verifier recomputed `entryHash` from
+    // the payload; it now verifies INCLUSION against a signed root instead, so
+    // the withheld fields are not needed by any check in this file.
+    const ev = evidenceOf(input);
     const dataIsland = JSON.stringify(sanitizeJsonValue({
-        report: input.report,
-        ledger: input.ledger ?? [],
+        report: { ...input.report, workspaceRoot: "" },
+        ledger: (input.ledger ?? []).map((e) => redactLedgerEntry(e, oracleWithheldKeys([]))),
         serve: input.serve !== undefined,
+        evidence: ev.status === "signed" ? ev.evidence : null,
+        unsignedNote: ev.status === "signed" ? null : STUDIO_UNSIGNED_NOTE[ev.reason],
     })).replace(/</g, "\\u003c");
     return `<!DOCTYPE html>
 <html lang="en">

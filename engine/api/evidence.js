@@ -11,10 +11,11 @@
  * the operator actually pointed at a file, which keeps this module free of an
  * IPC-reachable arbitrary-file-read oracle.
  */
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import { createPrivateKey } from "node:crypto";
 import { exportEvidence } from "../evidence/export.js";
 import { verifyEvidenceBundle } from "../evidence/verify.js";
+import { workspaceLabel } from "../review/workspace-label.js";
 /** Raised when supplied credential/trust material cannot be parsed. */
 export class EvidenceMaterialError extends Error {
     constructor(message) {
@@ -40,7 +41,7 @@ export function exportEvidenceBundle(params) {
         }
     }
     const bundle = exportEvidence(root, {
-        workspace: basename(root),
+        workspace: workspaceLabel(root, params.workspaceLabel),
         generatedAt: params.nowIso,
         ...(params.sinceSize !== undefined ? { sinceSize: params.sinceSize } : {}),
         ...(signingKey !== undefined ? { signTreeHeadWith: signingKey } : {}),

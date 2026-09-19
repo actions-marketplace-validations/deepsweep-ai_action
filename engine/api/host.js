@@ -26,6 +26,8 @@
 import { reviewWorkspace } from "./review.js";
 import { authorizeAction } from "./authorize.js";
 import { exportEvidenceBundle, EvidenceMaterialError, verifyEvidence } from "./evidence.js";
+import { compilePacket } from "../compliance/packet.js";
+import { isTemplateId } from "../compliance/templates.js";
 import { generateStudioArtifact, writeStudioArtifact } from "./studio.js";
 import { isSurface } from "../review/surface.js";
 import { ledgerTimeline } from "./timeline.js";
@@ -49,6 +51,7 @@ export const MAX_CORRELATION_ID_LENGTH = 128;
 export const HOST_COMMANDS = [
     "authorize",
     "export",
+    "packet",
     "review",
     "studio",
     "timeline",
@@ -221,6 +224,32 @@ function dispatch(command, params, nowIso) {
                 }),
             });
             return { result: r.bundle, exitCode: r.exitCode };
+        }
+        case "packet": {
+            // TEAM-ADR-038: the compliance compiler as a host capability, so the
+            // Studio and a CI runner produce packets over IPC without a CLI.
+            const templateId = params["templateId"];
+            if (!isTemplateId(templateId))
+                throw new HostParamError("params.templateId must be a known template id");
+            const window = params["window"];
+            if (!isPlainObject(window))
+                throw new HostParamError("params.window must be an object {fromIso,toIso}");
+            const fromIso = requiredString(window, "fromIso");
+            const toIso = requiredString(window, "toIso");
+            const disclosures = params["disclosures"];
+            if (disclosures !== undefined && !Array.isArray(disclosures))
+                throw new HostParamError("params.disclosures must be an array");
+            const r = compilePacket({
+                workspaceRoot: requiredString(params, "workspaceRoot"),
+                templateId,
+                window: { fromIso, toIso },
+                nowIso,
+                ...defined({
+                    disclosures: Array.isArray(disclosures) ? disclosures : undefined,
+                    signWithPem: optionalString(params, "signWithPem"),
+                }),
+            });
+            return r.status === "ok" ? { result: r.packet, exitCode: 0 } : { result: { status: r.status, reason: r.reason }, exitCode: r.exitCode };
         }
         case "verify": {
             const bundle = params["bundle"];

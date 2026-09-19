@@ -17,6 +17,8 @@ import { evaluate } from "../review/evaluate.js";
 import { enforcementEffectFor } from "../review/enforce.js";
 import { appendLedgerEntry } from "../review/ledger.js";
 import { sha256Hex } from "../review/canonical.js";
+import { appendLedgerSignature, signLedgerEntry } from "../review/ledger-sign.js";
+import { resolveClasses } from "../packs/bindings.js";
 /** Marker used when no rule matched and the policy's defaultEffect decided. */
 export const DEFAULT_EFFECT_RULE_LABEL = "(none — defaultEffect)";
 /**
@@ -35,6 +37,13 @@ export function authorizeAction(params) {
         source: r.source,
         reason: r.reasons[0] ?? "nonconforming",
     }));
+    // TEAM-ADR-041: classify the tool through the installed packs' bindings.
+    // Bindings travel INSIDE the signed pack, so a classification is exactly as
+    // trustworthy as the rules it makes effective.
+    const bindings = layered.packs.flatMap((p) => [...p.bindings]);
+    const classification = params.tool !== undefined && bindings.length > 0
+        ? resolveClasses(bindings, params.tool.toolName, params.tool.descriptionHash)
+        : null;
     const decision = evaluate(layered.policy, {
         principal: params.principal,
         agentType: null,
@@ -44,14 +53,22 @@ export function authorizeAction(params) {
         postureScore: 100,
         attestation: "claimed",
         driftOutstanding: false,
+        ...(classification !== null ? { resourceAliases: classification.aliases } : {}),
     });
     // A refused PRIMARY layer (org/workspace) poisons the whole evaluation:
     // ADR-010 maps it to the safe default, never to allow.
     const primaryRefused = layered.refusals.some((r) => r.layer !== "user");
     const acted = enforcementEffectFor(decision.outcome, primaryRefused ? "invalid" : "ok");
     const ruleLabel = decision.policyRef === null ? DEFAULT_EFFECT_RULE_LABEL : decision.policyRef.name;
+    const packLabels = layered.packs.map((p) => `${p.packId}@${p.version}#${p.bundleVersion}:${p.keyId}`);
     // ADR-018/ADR-021: HASHES + outcome only — a cloud-bound record never
     // carries principal/action/resource VALUES (metadata-first invariant).
+    // TEAM-ADR-041 adds, ONLY when present, closed-enum labels (taxonomy classes,
+    // classification confidence, pack provenance) — the same kind of metadata as
+    // `rule` and `mode`, never a name, argument or content; the payload is
+    // byte-identical to pre-041 when no pack is installed. Binding IDS stay
+    // in-process (AuthorizeResult.classification.bindings): they would name the
+    // vendor class the customer runs, which the hash-only record never did.
     const appended = appendLedgerEntry(root, "policy.decision", {
         principalHash: sha256Hex(decision.principal ?? ""),
         actionHash: sha256Hex(decision.action),
@@ -59,7 +76,12 @@ export function authorizeAction(params) {
         outcome: decision.outcome,
         rule: ruleLabel,
         mode: layered.mode,
+        ...(packLabels.length > 0 ? { packs: packLabels.join(",") } : {}),
+        ...(classification !== null ? { classes: classification.classes.join(","), classification: classification.confidence } : {}),
     }, params.nowIso);
+    if (appended !== "corrupt" && params.key !== undefined) {
+        appendLedgerSignature(root, signLedgerEntry(appended, params.key));
+    }
     const enforcing = layered.mode === "enforce";
     return {
         principal: decision.principal,
@@ -74,5 +96,7 @@ export function authorizeAction(params) {
         refusals,
         ledgerAppended: appended !== "corrupt",
         exitCode: enforcing ? (acted === "allow" ? 0 : acted === "require-approval" ? 3 : 4) : 0,
+        classification,
+        packs: packLabels,
     };
 }

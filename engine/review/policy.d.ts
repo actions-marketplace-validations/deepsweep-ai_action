@@ -51,6 +51,7 @@
 import type { CapabilityKind } from "./types.js";
 import type { AgentType } from "./identity.js";
 import type { DriftFinding } from "./diff.js";
+import { type LoadedPack } from "../packs/load.js";
 export declare const POLICY_SCHEMA_VERSION: 1;
 /** The single policy document (ADR-009 storage section). */
 export declare const POLICY_FILE = "policy.json";
@@ -251,7 +252,8 @@ export declare const POLICY_KEYS_FILE = "policy-keys.json";
 export declare const POLICY_KEYS_REL_PATH = ".deepsweep/policy-keys.json";
 export declare const POLICY_FLOOR_FILE = "policy-version.json";
 export declare function loadPolicy(workspaceRoot: string): PolicyLoad;
-export type PolicyLayer = "org" | "workspace" | "user";
+/** ADR-021 layers + the TEAM-ADR-041 `pack` layer (signed rule packs, below org/workspace, above user). */
+export type PolicyLayer = "org" | "workspace" | "pack" | "user";
 export interface LayerRefusal {
     readonly layer: PolicyLayer;
     readonly source: string;
@@ -267,6 +269,13 @@ export interface LayeredPolicyLoad {
      * surfaced loudly; other layers still load (fail-closed per layer). */
     readonly refusals: readonly LayerRefusal[];
     readonly layersLoaded: readonly PolicyLayer[];
+    /**
+     * TEAM-ADR-041: the signed rule packs that contributed rules, in load order
+     * (id, version, key, bundle hash, bindings) — provenance for the ledger and
+     * the binding set the authorizer classifies tools with. Empty when no pack
+     * is installed. A refused pack is in `refusals` (layer "pack") and NOT here.
+     */
+    readonly packs: readonly LoadedPack[];
 }
 /**
  * Three-layer operator policy (ADR-021): org bundle (signed, ADR-016) >
@@ -284,6 +293,16 @@ export interface LayeredPolicyLoad {
  * org layer when sealed+pinned and as the workspace layer when plain; the
  * merge machinery is N-layer so a separate org-bundle file (cloud sync) is
  * an additive follow-up, not a redesign.
+ *
+ * TEAM-ADR-041 — the PACK layer. Sealed rule packs (`.deepsweep/pack.<id>.json`,
+ * verified against `pack-keys.json`, see packs/load.ts) are absorbed AFTER the
+ * org/workspace slot and BEFORE the user layer, rules qualified
+ * `pack:<id>/<name>`. Precedence for `mode` is therefore org > workspace >
+ * pack-config > pack ("customer overrides > pack"); rules still merge
+ * deny-wins, so a pack can only be TIGHTENED below it and can itself only be
+ * tightened by an org/workspace rule. A refused pack is a `pack` layer
+ * refusal and, like a refused primary layer, forces `enforce` (a broken pack
+ * must never silently stop acting).
  * `userConfigRoot` is injection-only (ADR-014/ADR-005: the engine cannot
  * locate the user profile).
  */

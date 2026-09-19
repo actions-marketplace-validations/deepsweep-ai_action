@@ -108,6 +108,16 @@ export interface EvaluationContext {
     readonly attestation: ConditionAttestationTier;
     /** True when the run has unresolved pin.drift / pin.conflict / baseline.tampered. */
     readonly driftOutstanding: boolean;
+    /**
+     * TEAM-ADR-041 (additive, optional): further logical identifiers the SAME
+     * action tuple is known by — today the taxonomy classes a signed rule pack
+     * resolved for the tool (`class/<id>`, or `class/<id>#heuristic` for a
+     * name-pattern guess). A rule is effective when its resource matcher names
+     * the primary resource OR any alias; everything else (principal, condition,
+     * most-restrictive-wins, ordering) is unchanged. Absent or empty = the
+     * pre-041 behaviour byte-for-byte (the frozen vectors carry no aliases).
+     */
+    readonly resourceAliases?: readonly string[];
 }
 /**
  * A fully-explained decision (ADR-009 forward map): every field a

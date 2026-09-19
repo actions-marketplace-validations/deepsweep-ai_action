@@ -21,20 +21,27 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
+import { workspaceLabel } from "./workspace-label.js";
 import { runReviewOnce } from "../oneshot.js";
 import { computeTrustScores } from "./score.js";
 import { readLedger, verifyChain } from "./ledger.js";
 import { loadLayeredPolicy, validatePolicy, POLICY_REL_PATH } from "./policy.js";
 import { readStoreText, writeStoreAtomic } from "./store.js";
 import { renderStudio } from "./studio.js";
+import { buildStudioEvidence } from "./studio-evidence.js";
 import { WEB_SURFACE_CONTEXT } from "./surface.js";
 /** The sanctioned cloud-plane bases (founder directive; health-verified). */
 export const API_BASE = "https://api.deepsweep.ai/v1";
 export const API_BASE_DEV = "https://api-dev.deepsweep.ai/v1";
 /** Assemble a StudioInput by running one review over `root` (appends one
- * ledger entry — callers cache the result; see GET idempotence above). */
-export function assembleStudioInput(root, toolVersion, userConfigRoot, now) {
+ * ledger entry — callers cache the result; see GET idempotence above).
+ *
+ * TEAM-ADR-052: `signWithPem` is the Ed25519 material the artifact's tree head
+ * is signed with. Absent — the true state today, the signing ceremony has not
+ * happened — the artifact is UNSIGNED and says so; it never downgrades to a
+ * self-consistency check dressed up as verification. */
+export function assembleStudioInput(root, toolVersion, userConfigRoot, now, signWithPem) {
     const opts = {};
     if (userConfigRoot !== undefined)
         opts.userConfigRoot = userConfigRoot;
@@ -43,6 +50,7 @@ export function assembleStudioInput(root, toolVersion, userConfigRoot, now) {
     const result = runReviewOnce(root, opts);
     const ledger = readLedger(root);
     const layered = loadLayeredPolicy(root, userConfigRoot !== undefined ? { userConfigRoot } : {});
+    const generatedAt = (now?.() ?? new Date()).toISOString();
     return {
         report: result.report,
         findings: result.findings,
@@ -56,10 +64,11 @@ export function assembleStudioInput(root, toolVersion, userConfigRoot, now) {
         chainVerified: ledger !== undefined && verifyChain(ledger),
         mode: layered.mode,
         layersLoaded: layered.layersLoaded,
-        workspace: basename(root),
+        workspace: workspaceLabel(root), // TEAM-ADR-048 — the artifact never carries the basename
         workspaceRoot: root,
-        generatedAt: (now?.() ?? new Date()).toISOString(),
+        generatedAt,
         toolVersion,
+        evidence: buildStudioEvidence(ledger, generatedAt, signWithPem),
     };
 }
 function readBody(req, maxBytes) {
@@ -102,7 +111,7 @@ export function startStudioServer(options) {
     let currentRoot = resolve(options.initialRoot);
     let cachedHtml;
     const rebuild = () => {
-        const input = assembleStudioInput(currentRoot, options.toolVersion, options.userConfigRoot, options.now);
+        const input = assembleStudioInput(currentRoot, options.toolVersion, options.userConfigRoot, options.now, options.signWithPem);
         cachedHtml = renderStudio({
             ...input,
             serve: { token },

@@ -1,49 +1,6 @@
-/**
- * S2.1 — AgentIdentity records + stable Agent IDs (ADR-005, the BINDING
- * contract for this module).
- *
- * An Agent is an agent *installation observed in a workspace*, keyed by
- * (agentType, workspace):
- *  - `agentType` is derived from which allowlisted config surfaces exist —
- *    the detectors already discriminate them; the set evolves ADDITIVELY like
- *    CapabilityKind. Generic surfaces attributable to no specific agent
- *    product (.env*, .git, AGENTS.md, .deepsweep/*) map to no agent type.
- *  - `workspace` is the root BASENAME only (ADR-003). Same-basename clones
- *    collide by design, exactly as pins do.
- *  - agentId = "agt_" + first 16 hex of
- *    SHA-256(canonicalize({ schemaVersion: 1, agentType, workspace }))
- *    using the ONE canonicalizer (canonical.ts). 64 bits is sufficient
- *    because agentId is an ATTRIBUTION identifier, never an authority bearer.
- *
- * Trust model (ADR-005, binding): everything here is a CLAIM by the subject
- * about itself — attestation level `claimed`. Every rendered surface must use
- * the "agent claiming to be X" phrasing (claimedIdentityClaim below is the
- * single source of that copy) and never present a claimed identity as
- * authenticated. Containment of authority (binding-before-E4): the identity
- * store is attribution-for-explainability ONLY — no code path may treat a
- * store-resolved record as ground truth or broaden any outcome on agentId
- * equality; principal fill uses fresh derivation (principalFor), never a
- * store lookup. A contract test (tests/identity.test.ts) guards this.
- *
- * Storage: `.deepsweep/identity.json` — a registry of observed agents,
- * SEPARATE from the baseline so attribution continuity SURVIVES baseline
- * resets. Inherits every ADR-003 containment/content invariant verbatim via
- * the shared store primitives (store.ts): symlink/realpath refusal,
- * regular-file check, size cap, atomic 0600 writes, metadata-only,
- * basename-only, safe-to-commit, regenerate-not-migrate (warning-severity
- * `identity.regenerated`), and the agent-writable threat note unchanged. The
- * store has NO tamper story until S2.3/E4 (ADR-005 F2) — records are
- * explainability, never authority.
- *
- * Owner (ADR-005 F1, transient-only): the claimed owner (git `user.email`,
- * read under ADR-002 containment via safeRead) is held at runtime for local
- * human display only. It is NEVER written to identity.json, any event, the
- * --json dump, or any artifact. The OS username is NEVER read at any tier.
- * ADR-002 allowlist extension (S2.1): `.git/config` — presence + the
- * user.email value, read transiently, never persisted.
- */
-import { basename, resolve } from "node:path";
-import { canonicalize, sha256Hex } from "./canonical.js";
+import { workspaceLabel } from "./workspace-label.js";
+import { canonicalize } from "./canonical.js";
+import { PIN_DOMAIN, pinHash, resolvePinKey, sameKeyId } from "./pinkey.js";
 import { safeRead } from "./read.js";
 import { readStoreText, STORE_DIR, writeStoreAtomic } from "./store.js";
 export const IDENTITY_FILE = "identity.json";
@@ -64,7 +21,8 @@ const refuse = (reason) => new IdentityRefusalError(reason);
  * they change.
  */
 export function deriveAgentId(agentType, workspace) {
-    return `agt_${sha256Hex(canonicalize({ schemaVersion: 1, agentType, workspace })).slice(0, 16)}`;
+    const digest = pinHash(resolvePinKey(), PIN_DOMAIN.agentId, canonicalize({ schemaVersion: 1, agentType, workspace }));
+    return `agt_${digest.slice(0, 16)}`;
 }
 /**
  * Map an allowlisted reviewed-source path to the agent surface it belongs to.
@@ -74,6 +32,13 @@ export function deriveAgentId(agentType, workspace) {
  * `.vscode/mcp.json` is the VS Code (Copilot agent mode) MCP config.
  */
 export function agentTypeForSource(source) {
+    // User-scope sources are labelled with a literal `~/` prefix by the
+    // detectors (e.g. `~/.trae/mcp.json`, `~/.kiro/settings/mcp.json`). Strip it
+    // so a user-scope file attributes to the same agent as its workspace twin.
+    // This can only turn `undefined` into an attribution — no existing pattern
+    // begins with `~`, so no current answer changes.
+    if (source.startsWith("~/"))
+        source = source.slice(2);
     if (source === ".cursorrules" || source.startsWith(".cursor/"))
         return "cursor";
     if (source === ".mcp.json" || source.startsWith(".claude/"))
@@ -88,6 +53,15 @@ export function agentTypeForSource(source) {
         return "windsurf";
     if (source === ".devcontainer.json" || source.startsWith(".devcontainer/"))
         return "devcontainer";
+    // Antigravity reads Gemini surfaces: GEMINI.md is its context file and
+    // `.gemini/` holds its MCP config and OAuth token store (the detector reads
+    // presence only; so does this mapping).
+    if (source === "GEMINI.md" || source.startsWith(".gemini/"))
+        return "antigravity";
+    if (source.startsWith(".trae/"))
+        return "trae";
+    if (source.startsWith(".kiro/"))
+        return "kiro";
     return undefined;
 }
 /** Distinct agent types observed in a run's reviewed sources, sorted. */
@@ -155,8 +129,11 @@ export function loadIdentity(workspaceRoot) {
     const r = parsed;
     if (r["schemaVersion"] !== 1)
         return { status: "invalid", reason: "unknownSchemaVersion" };
-    if (typeof r["workspace"] !== "string" || r["workspace"] !== basename(resolve(workspaceRoot))) {
+    if (typeof r["workspace"] !== "string" || r["workspace"] !== workspaceLabel(workspaceRoot)) {
         return { status: "invalid", reason: "foreignWorkspace" };
+    }
+    if (typeof r["pinKeyId"] !== "string" || !sameKeyId(r["pinKeyId"], resolvePinKey().keyId)) {
+        return { status: "invalid", reason: "foreignPinKey" };
     }
     const agents = r["agents"];
     if (!Array.isArray(agents) || !agents.every(isIdentityRecord)) {
@@ -179,7 +156,7 @@ export function writeIdentity(workspaceRoot, identity) {
  * containment violations (CLI exit 3).
  */
 export function observeIdentities(workspaceRoot, reviewedSources, nowIso) {
-    const workspace = basename(resolve(workspaceRoot));
+    const workspace = workspaceLabel(workspaceRoot);
     const findings = [];
     const loaded = loadIdentity(workspaceRoot);
     let records;
@@ -214,7 +191,12 @@ export function observeIdentities(workspaceRoot, reviewedSources, nowIso) {
     }
     if (mustWrite) {
         // Same check → mkdir → re-check → atomic-rename path as the baseline.
-        writeIdentity(workspaceRoot, { schemaVersion: 1, workspace, agents: records });
+        writeIdentity(workspaceRoot, {
+            schemaVersion: 1,
+            workspace,
+            pinKeyId: resolvePinKey().keyId,
+            agents: records,
+        });
     }
     return { records, findings };
 }

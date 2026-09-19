@@ -18,12 +18,13 @@
  *    exit 0.
  */
 import { existsSync, watch as fsWatch } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { review } from "./review/engine.js";
 import { extractPins, PIN_SOURCES } from "./review/pins.js";
 import { diffReports } from "./review/diff.js";
 import { BASELINE_DIR, BASELINE_REL_PATH, baselineCreatedFinding, baselineRegeneratedFinding, baselineTamperedFinding, buildBaseline, hashBaselineOnDisk, loadBaseline, writeBaseline, } from "./review/baseline.js";
 import { buildEvent, eventLine } from "./review/events.js";
+import { workspaceLabel } from "./review/workspace-label.js";
 import { claimedIdentityClaim, observeIdentities, principalFor, readClaimedOwner, } from "./review/identity.js";
 import { computeTrustScores, factorLine, POSTURE_ASSURANCE_NOTE, POSTURE_HONEST_LIMIT_NOTE, qualifiedPostureLine, } from "./review/score.js";
 import { loadPolicy } from "./review/policy.js";
@@ -131,7 +132,7 @@ function delay(ms) {
 /** May throw BaselineRefusalError before any watcher is created (exit 3). */
 export async function startWatch(opts) {
     const root = resolve(opts.workspaceRoot);
-    const workspace = basename(root);
+    const workspace = workspaceLabel(root); // TEAM-ADR-048 — never the basename
     const json = opts.json ?? false;
     const out = opts.stdout ?? process.stdout;
     const err = opts.stderr ?? process.stderr;

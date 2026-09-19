@@ -1,9 +1,10 @@
 import { canonicalize, sha256Hex } from "./canonical.js";
-import { verifyBundle } from "./bundle.js";
+import { parseTrustConfig, verifyBundle } from "./bundle.js";
 import { readStoreText, STORE_DIR, writeStoreAtomic } from "./store.js";
 import { safeReadUser } from "./read.js";
 import { sanitizeField } from "./sanitize.js";
 import { selfProtectionOverrideAttempts, selfProtectionRefusalReason } from "./self-protect.js";
+import { loadPacks } from "../packs/load.js";
 export const POLICY_SCHEMA_VERSION = 1;
 /** The single policy document (ADR-009 storage section). */
 export const POLICY_FILE = "policy.json";
@@ -474,31 +475,18 @@ export function matchesResource(matcher, resource) {
 export const POLICY_KEYS_FILE = "policy-keys.json";
 export const POLICY_KEYS_REL_PATH = `${STORE_DIR}/${POLICY_KEYS_FILE}`;
 export const POLICY_FLOOR_FILE = "policy-version.json";
+/**
+ * Pinned trust config (ADR-016). Present => SIGNING IS REQUIRED: a plain
+ * unsigned policy.json is a downgrade attempt and refuses whole-set.
+ * `minBundleVersion` is the operator-managed replay floor that survives
+ * destruction of the agent-writable high-water store. Commit this file:
+ * it is metadata (public keys + ids), reviewable and drift-pinnable.
+ */
 function loadTrustConfig(workspaceRoot) {
     const text = readStoreText(workspaceRoot, POLICY_KEYS_FILE, policyRefuse);
     if (text === undefined)
         return undefined;
-    try {
-        const parsed = JSON.parse(text);
-        if (typeof parsed !== "object" || parsed === null || parsed["schemaVersion"] !== 1)
-            return "malformed";
-        const rawKeys = parsed["keys"];
-        if (!Array.isArray(rawKeys) || rawKeys.length === 0)
-            return "malformed";
-        const keys = [];
-        for (const k of rawKeys) {
-            const rec = k;
-            if (typeof rec?.["keyId"] !== "string" || typeof rec?.["publicKey"] !== "string")
-                return "malformed";
-            keys.push({ keyId: rec["keyId"], publicKey: rec["publicKey"] });
-        }
-        const min = parsed["minBundleVersion"];
-        const minBundleVersion = typeof min === "number" && Number.isInteger(min) && min >= 0 ? min : 0;
-        return { keys, minBundleVersion };
-    }
-    catch {
-        return "malformed";
-    }
+    return parseTrustConfig(text);
 }
 /** High-water mark of the last ACCEPTED bundleVersion (0 when absent/torn). */
 function readAcceptedFloor(workspaceRoot) {
@@ -598,6 +586,16 @@ const DEFAULT_EFFECT_RANK = {
  * org layer when sealed+pinned and as the workspace layer when plain; the
  * merge machinery is N-layer so a separate org-bundle file (cloud sync) is
  * an additive follow-up, not a redesign.
+ *
+ * TEAM-ADR-041 — the PACK layer. Sealed rule packs (`.deepsweep/pack.<id>.json`,
+ * verified against `pack-keys.json`, see packs/load.ts) are absorbed AFTER the
+ * org/workspace slot and BEFORE the user layer, rules qualified
+ * `pack:<id>/<name>`. Precedence for `mode` is therefore org > workspace >
+ * pack-config > pack ("customer overrides > pack"); rules still merge
+ * deny-wins, so a pack can only be TIGHTENED below it and can itself only be
+ * tightened by an org/workspace rule. A refused pack is a `pack` layer
+ * refusal and, like a refused primary layer, forces `enforce` (a broken pack
+ * must never silently stop acting).
  * `userConfigRoot` is injection-only (ADR-014/ADR-005: the engine cannot
  * locate the user profile).
  */
@@ -617,18 +615,23 @@ export function loadLayeredPolicy(workspaceRoot, opts = {}) {
      * not depend on this check: `guardFsMutation` denies the mutation anyway.
      * This exists so the misconfiguration is visible, not so the protection is.
      */
-    const absorb = (layer, set, source) => {
+    const absorb = (layer, set, source, pack) => {
         const attempts = selfProtectionOverrideAttempts(set.rules);
         if (attempts.length > 0) {
             refusals.push({ layer, source, reasons: [selfProtectionRefusalReason(attempts)] });
             return false;
         }
         layersLoaded.push(layer);
+        const prefix = pack === undefined ? `${layer}:` : `${layer}:${pack.qualifier}/`;
         for (const rule of set.rules) {
-            merged.push({ ...rule, name: `${layer}:${rule.name}` });
+            merged.push({ ...rule, name: `${prefix}${rule.name}` });
         }
-        if (mode === undefined && layer !== "user" && set.mode !== undefined)
-            mode = set.mode;
+        // Mode: first DECLARING non-user layer wins in absorb order (org/workspace
+        // before packs). A pack's effective mode is its customer config, else the
+        // compiled policy's own declaration.
+        const declared = pack === undefined ? set.mode : pack.mode;
+        if (mode === undefined && layer !== "user" && declared !== undefined)
+            mode = declared;
         const de = set.defaultEffect ?? "observe";
         if (DEFAULT_EFFECT_RANK[de] > DEFAULT_EFFECT_RANK[defaultEffect])
             defaultEffect = de;
@@ -643,6 +646,22 @@ export function loadLayeredPolicy(workspaceRoot, opts = {}) {
     else if (primary.status === "ok") {
         const sealed = loadTrustConfig(workspaceRoot) !== undefined;
         absorb(sealed ? "org" : "workspace", primary.policy, POLICY_REL_PATH);
+    }
+    // Pack layer (TEAM-ADR-041): each sealed pack verified by packs/load.ts;
+    // its compiled policy validated HERE by the one validator; absorbed with
+    // `pack:<id>/` qualification. Refusals surface loudly per pack.
+    const packLayer = loadPacks(workspaceRoot);
+    const packs = [];
+    for (const r of packLayer.refusals)
+        refusals.push({ layer: "pack", source: r.source, reasons: r.reasons });
+    for (const p of packLayer.packs) {
+        const result = validatePolicy(p.policyDoc, p.source);
+        if (!result.ok) {
+            refusals.push({ layer: "pack", source: p.source, reasons: result.reasons });
+            continue;
+        }
+        if (absorb("pack", result.policy, p.source, { qualifier: p.packId, mode: p.mode }))
+            packs.push(p);
     }
     // User layer: plain policy only, narrowing only.
     if (opts.userConfigRoot !== undefined) {
@@ -696,5 +715,6 @@ export function loadLayeredPolicy(workspaceRoot, opts = {}) {
         mode: primaryRefused ? "enforce" : (mode ?? "observe"),
         refusals,
         layersLoaded,
+        packs,
     };
 }

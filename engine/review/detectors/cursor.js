@@ -8,6 +8,7 @@
  */
 import { exists, parseTolerantJson, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
+import { redactCommandLine } from "../pins.js";
 import { asRecord, asString, dirNamesOrWarn, isBlankDocument, malformedWarning, nameList, unreadableWarning, visibleNames, } from "./util.js";
 import { countNoun } from "../text.js";
 const RULES_FILE = ".cursorrules";
@@ -63,9 +64,11 @@ function detect(workspaceRoot) {
                 const entries = hooks[event];
                 const list = Array.isArray(entries) ? entries : [entries];
                 for (const entry of list) {
-                    const command = asString(asRecord(entry)?.["command"]) ?? asString(entry);
-                    if (command === undefined)
+                    const rawCommand = asString(asRecord(entry)?.["command"]) ?? asString(entry);
+                    if (rawCommand === undefined)
                         continue;
+                    // TEAM-ADR-049: redact at the PRODUCER — see redactCommandLine.
+                    const command = redactCommandLine(rawCommand);
                     out.capabilities.push({
                         kind: "shellExecution",
                         summary: `Cursor hook "${event}" runs a local command ("${command}") around agent actions`,

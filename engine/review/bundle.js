@@ -18,10 +18,15 @@
  * numbers, and failure classes — never key material or bundle content.
  *
  * Replay protection: `bundleVersion` is a strictly-monotonic integer. A
- * verifier refuses any bundle whose version is <= the floor it is given
- * (the caller persists the high-water mark of the last ACCEPTED bundle and
- * may additionally pin a minimum in the trusted-keys config — the config
- * floor holds even if the agent-writable high-water store is destroyed).
+ * verifier refuses any bundle whose version is BELOW the floor it is given —
+ * the floor is the LOWEST ACCEPTABLE version: the last ACCEPTED bundle (the
+ * caller persists that high-water mark) or the operator's `minBundleVersion`
+ * in the trusted-keys config, whichever is higher; the config floor holds
+ * even if the agent-writable high-water store is destroyed. Re-reading the
+ * currently accepted bundle is NOT a replay (TEAM-ADR-041 amendment to
+ * ADR-016 §5: the original `<=` made every sealed policy refuse on its
+ * second load, and ADR-016's own rotation runbook — "raise minBundleVersion
+ * to that version" — only works with an inclusive floor).
  *
  * Sync API choice: the KeyObject sign/verify API (crypto.sign(null, …)) is
  * used rather than webcrypto.subtle — same Ed25519 curve, but synchronous
@@ -32,6 +37,30 @@
 import { createPublicKey, sign as edSign, verify as edVerify, } from "node:crypto";
 import { canonicalize, sha256Hex } from "./canonical.js";
 export const BUNDLE_SCHEMA_VERSION = 1;
+/** Parse trust-config TEXT. `"malformed"` is a typed refusal — callers must fail closed on it. */
+export function parseTrustConfig(text) {
+    try {
+        const parsed = JSON.parse(text);
+        if (typeof parsed !== "object" || parsed === null || parsed["schemaVersion"] !== 1)
+            return "malformed";
+        const rawKeys = parsed["keys"];
+        if (!Array.isArray(rawKeys) || rawKeys.length === 0)
+            return "malformed";
+        const keys = [];
+        for (const k of rawKeys) {
+            const rec = k;
+            if (typeof rec?.["keyId"] !== "string" || typeof rec?.["publicKey"] !== "string")
+                return "malformed";
+            keys.push({ keyId: rec["keyId"], publicKey: rec["publicKey"] });
+        }
+        const min = parsed["minBundleVersion"];
+        const minBundleVersion = typeof min === "number" && Number.isInteger(min) && min >= 0 ? min : 0;
+        return { keys, minBundleVersion };
+    }
+    catch {
+        return "malformed";
+    }
+}
 /** Derive the pinnable key id from a public key. */
 export function keyIdFor(publicKey) {
     const spki = publicKey.export({ type: "spki", format: "der" });
@@ -76,8 +105,9 @@ function isPolicyBundle(v) {
 /**
  * Verify a sealed bundle against the pinned trust set and the replay floor.
  * Total over arbitrary runtime input; EVERY failure is a typed refusal.
- * `floor` is the highest bundleVersion already accepted (0 = none yet):
- * a verified bundle must be STRICTLY newer.
+ * `floor` is the lowest acceptable bundleVersion (0 = nothing accepted yet):
+ * a verified bundle must be AT OR ABOVE it — the currently accepted bundle
+ * re-verifies; anything older is a replay.
  */
 export function verifyBundle(sealed, trustedKeys, floor) {
     if (typeof sealed !== "object" || sealed === null || Array.isArray(sealed)) {
@@ -117,11 +147,11 @@ export function verifyBundle(sealed, trustedKeys, floor) {
     if (!sigOk) {
         return { ok: false, reason: "bad-signature", detail: `signature does not verify under ${keyId}` };
     }
-    if (bundle.bundleVersion <= floor) {
+    if (bundle.bundleVersion < floor) {
         return {
             ok: false,
             reason: "replayed-version",
-            detail: `bundleVersion ${bundle.bundleVersion} is not newer than the accepted floor ${floor}`,
+            detail: `bundleVersion ${bundle.bundleVersion} is below the accepted floor ${floor}`,
         };
     }
     return { ok: true, bundle, keyId };

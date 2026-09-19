@@ -26,7 +26,7 @@ import { BaselineRefusalError } from "../review/baseline.js";
 export function generateStudioArtifact(params) {
     const root = resolve(params.workspaceRoot);
     const nowIso = params.nowIso;
-    const input = assembleStudioInput(root, params.toolVersion, params.userConfigRoot, () => new Date(nowIso));
+    const input = assembleStudioInput(root, params.toolVersion, params.userConfigRoot, () => new Date(nowIso), params.signWithPem);
     const withSurface = {
         ...input,
         surfaceContext: params.surfaceContext ?? WEB_SURFACE_CONTEXT,

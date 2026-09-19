@@ -33,6 +33,7 @@ import { BaselineRefusalError } from "./review/baseline.js";
 import { IdentityRefusalError, readClaimedOwner } from "./review/identity.js";
 import { LedgerRefusalError } from "./review/ledger.js";
 import { PolicyRefusalError, ACTION_VOCABULARY } from "./review/policy.js";
+import { WorkspaceLabelError } from "./review/workspace-label.js";
 import { homedir } from "node:os";
 import { authorizeAction, EvidenceMaterialError, exportEvidenceBundle, generateStudioArtifact, parseTrustedKeys, reviewWorkspace, startWatch, verifyEvidence, writeStudioArtifact, } from "./api/index.js";
 import { startStudioServer } from "./review/studio-server.js";
@@ -496,6 +497,15 @@ try {
     }
 }
 catch (e) {
+    if (e instanceof WorkspaceLabelError) {
+        // A supplied DEEPSWEEP_WORKSPACE_LABEL that cannot be used as given is an
+        // OPERATOR error, not a containment refusal — exit 1 (usage), never 3. The
+        // message already explains the shape; without this arm it escaped the
+        // boundary and Node printed a stack trace over it, which is what an
+        // operator saw at the exact moment they most needed the rule restated.
+        console.error(renderErrorLine(e.message));
+        process.exit(1);
+    }
     if (e instanceof BaselineRefusalError ||
         e instanceof IdentityRefusalError ||
         e instanceof PolicyRefusalError ||
