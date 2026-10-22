@@ -22,7 +22,7 @@
  */
 import { readdirSync } from "node:fs";
 import { parseTrustConfig, verifyBundle } from "../review/bundle.js";
-import { checkedStorePaths, readStoreText, STORE_DIR, writeStoreAtomic } from "../review/store.js";
+import { checkedStorePaths, readStoreFile, readStoreText, STORE_DIR, writeStoreAtomic } from "../review/store.js";
 import { sanitizeField } from "../review/sanitize.js";
 import { isPlainObject } from "./taxonomy.js";
 import { packBundleHash, validatePackBlock } from "./pack.js";
@@ -73,9 +73,14 @@ function readAcceptedFloor(workspaceRoot, packId) {
     }
 }
 function readConfig(workspaceRoot, packId) {
-    const text = readStoreText(workspaceRoot, packConfigFileName(packId), refuse);
-    if (text === undefined)
+    const read = readStoreFile(workspaceRoot, packConfigFileName(packId), refuse);
+    if (read.status === "absent")
         return { ok: true, config: undefined };
+    // TEAM-ADR-069 fix pass 1 (P1): a config that exists but cannot be read
+    // refuses the pack; read as absent, it silently dropped the configured mode.
+    if (read.status === "unreadable")
+        return { ok: false, reason: `${packConfigFileName(packId)} exists but could not be read (${read.cause})` };
+    const text = read.text;
     let parsed;
     try {
         parsed = JSON.parse(text);

@@ -34,22 +34,25 @@ function esc(value) {
         .replace(/'/g, "&#39;");
 }
 const SEV_TOKEN = {
-    critical: { token: "[FAIL]", color: "#e28f88" },
-    high: { token: "[FAIL]", color: "#e28f88" },
-    medium: { token: "[WARN]", color: "#dcb475" },
-    warning: { token: "[WARN]", color: "#dcb475" },
-    info: { token: "[PASS]", color: "#8fc7a2" },
+    critical: { token: "[FAIL]", color: "var(--color-fail)" },
+    high: { token: "[FAIL]", color: "var(--color-fail)" },
+    medium: { token: "[WARN]", color: "var(--color-warn)" },
+    warning: { token: "[WARN]", color: "var(--color-warn)" },
+    info: { token: "[PASS]", color: "var(--color-ok)" },
 };
-/** Nocturne tokens (styles.css source of truth), network import removed;
- * ground retuned darker per founder direction 2026-08-01 (Cursor-like
- * near-black: bg #0b0c12, surface #15161e) — accent/ramps unchanged. */
+/** Brand tokens (TEAM-ADR-074): the founder-approved warm light canvas, white
+ * panel and ink from the executive gallery, over the neutral dark scheme of
+ * TEAM-ADR-073. Every text colour clears 4.5:1 on canvas, panel and recessed
+ * surface in both modes; the Studio's tokens.css carries these two blocks byte
+ * for byte and its guard compares them. */
 const TOKENS_CSS = `
-:root{--color-bg:#0b0c12;--color-surface:#15161e;--color-text:#e9e9ed;--color-accent:#9184d9;--color-accent-300:#d2cefd;--color-accent-800:#423a6a;--color-accent-900:#2b2741;--color-divider:color-mix(in srgb,#e9e9ed 16%,transparent);--color-neutral-300:#cfd3e5;--color-neutral-400:#b2b6ca;--color-neutral-500:#9397ab;--color-neutral-600:#75798c;--color-neutral-700:#595d6c;--color-neutral-800:#3f424d;--font-heading:system-ui,-apple-system,"Segoe UI",sans-serif;--font-body:system-ui,-apple-system,"Segoe UI",sans-serif;--radius-sm:4px;--radius-md:8px;--radius-lg:14px;--shadow-md:0 0 0 1px #3f424d,0 8px 24px rgba(0,0,0,.7)}
+:root{color-scheme:light dark;--color-bg:#f5f3ee;--color-surface:#ffffff;--color-surface-2:#eeede8;--color-text:#252525;--color-text-2:#555555;--color-accent:#252525;--color-accent-300:#262626;--color-accent-800:#262626;--color-accent-900:#ededed;--color-on-accent:#ffffff;--color-divider:color-mix(in srgb,#252525 14%,transparent);--color-neutral-300:#404040;--color-neutral-400:#4a4a4a;--color-neutral-500:#595959;--color-neutral-600:#666666;--color-neutral-700:#a3a3a3;--color-neutral-800:#dedede;--color-ok:#252525;--color-warn:#835000;--color-fail:#a3362b;--color-info:#404040;--color-focus:#252525;--font-heading:system-ui,-apple-system,"Segoe UI",sans-serif;--font-body:system-ui,-apple-system,"Segoe UI",sans-serif;--font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--radius-sm:4px;--radius-md:8px;--radius-lg:14px;--shadow-md:0 1px 2px rgba(0,0,0,.06),0 8px 24px rgba(0,0,0,.08);--mark-filter:grayscale(1) brightness(0)}
+@media (prefers-color-scheme:dark){:root{--color-bg:#0b0b0b;--color-surface:#151515;--color-surface-2:#202020;--color-text:#f5f5f5;--color-text-2:#b3b3b3;--color-accent:#f5f5f5;--color-accent-300:#ffffff;--color-accent-800:#333333;--color-accent-900:#232323;--color-on-accent:#f5f5f5;--color-divider:color-mix(in srgb,#f5f5f5 16%,transparent);--color-neutral-300:#d4d4d4;--color-neutral-400:#bfbfbf;--color-neutral-500:#aaaaaa;--color-neutral-600:#999999;--color-neutral-700:#666666;--color-neutral-800:#333333;--color-ok:#f5f5f5;--color-warn:#e8b86a;--color-fail:#f29c90;--color-info:#b3b3b3;--color-focus:#f5f5f5;--shadow-md:0 0 0 1px #333333,0 8px 24px rgba(0,0,0,.45);--mark-filter:grayscale(1) brightness(0) invert(1)}}
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;background:var(--color-bg);color:var(--color-text);font:400 15px/1.55 var(--font-body)}
 h4{font-family:var(--font-heading);font-weight:500;line-height:1.12;letter-spacing:-.015em;margin:0 0 6px;font-size:20px}
 a{color:var(--color-accent);text-underline-offset:3px}
-:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;text-decoration:none;font-family:var(--font-heading);font-weight:500;font-size:14px;line-height:1.2;color:var(--color-text);background:transparent;border:1px solid transparent;padding:6px 12px;border-radius:var(--radius-md)}
 .btn-primary{color:var(--color-accent);border-color:var(--color-accent)}.btn-primary:hover{background:color-mix(in srgb,var(--color-accent) 12%,transparent)}
 .btn-secondary{border-color:var(--color-divider)}.btn-secondary:hover{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
@@ -57,19 +60,19 @@ a{color:var(--color-accent);text-underline-offset:3px}
 .btn-block{width:100%;margin-top:6px}
 .card{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:var(--radius-md);background:var(--color-surface)}
 .card-kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent)}
-.card-meta{display:flex;align-items:center;gap:6px;font-size:11px;color:color-mix(in srgb,var(--color-text) 50%,transparent)}
-.elev-sm{box-shadow:0 0 0 1px #3f424d}
+.card-meta{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-2)}
+.elev-sm{box-shadow:0 0 0 1px var(--color-neutral-800)}
 .tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.02em;padding:3px 10px;border-radius:6px}
-.tag-accent{background:var(--color-accent-800);color:#f5f4ff}.tag-neutral{background:var(--color-neutral-800);color:#f3f5fe}.tag-outline{border:1px solid var(--color-accent);color:var(--color-accent)}
+.tag-accent{background:var(--color-accent-800);color:var(--color-on-accent)}.tag-neutral{background:var(--color-neutral-800);color:var(--color-text)}.tag-outline{border:1px solid var(--color-accent);color:var(--color-accent)}
 .seg{display:inline-flex;overflow:hidden;border:1px solid var(--color-divider);border-radius:var(--radius-md)}
 .seg-opt{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;font-size:13px;cursor:pointer;background:transparent;border:0;color:var(--color-neutral-400);font-family:inherit}
 .seg-opt+.seg-opt{border-left:1px solid var(--color-divider)}
 .seg-opt[aria-pressed="true"]{color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent)}
 .table{width:100%;border-collapse:collapse;font-size:14px}
-.table th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 60%,transparent);padding:6px}
+.table th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-2);padding:6px}
 .table td{padding:6px}
 .table tbody tr{background:linear-gradient(to right,transparent,color-mix(in srgb,var(--color-text) 8%,transparent) 48px,color-mix(in srgb,var(--color-text) 8%,transparent) calc(100% - 48px),transparent) no-repeat bottom/100% 1px}
-.mono{font-family:ui-monospace,Menlo,monospace}
+.mono{font-family:var(--font-mono)}
 .screen{display:none}.screen.active{display:flex}
 .navitem{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--radius-md);color:var(--color-neutral-400);font-size:13px;cursor:pointer;background:transparent;border:0;width:100%;text-align:left;font-family:inherit}
 .navitem[aria-current="true"]{background:color-mix(in srgb,var(--color-accent) 12%,transparent);color:var(--color-accent-300);box-shadow:inset 2px 0 0 var(--color-accent)}
@@ -79,12 +82,11 @@ a{color:var(--color-accent);text-underline-offset:3px}
 @keyframes ds-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 .marquee{overflow:hidden;mask-image:linear-gradient(to right,transparent,#000 8%,#000 92%,transparent)}
 .marquee-track{display:flex;gap:44px;width:max-content;align-items:center;animation:ds-marquee 42s linear infinite}
-.mark{display:flex;align-items:center;gap:8px;filter:grayscale(1) brightness(0) invert(1);opacity:.6;transition:opacity .2s}
-.mark:hover{opacity:1}
-.mark svg{height:20px;width:auto;display:block}
+.mark{display:flex;align-items:center;gap:8px}
+.mark svg{height:20px;width:auto;display:block;filter:var(--mark-filter);opacity:.6;transition:opacity .2s}
+.mark:hover svg{opacity:1}
 .mark-label{font-size:11px;color:var(--color-neutral-500);white-space:nowrap}
-.bigtech .mark{opacity:.32}
-.bigtech .mark svg{height:16px}
+.bigtech .mark svg{height:16px;opacity:.32}
 @media (prefers-reduced-motion:reduce){.ease-in{animation:none;opacity:1}.marquee-track{animation:none}}
 `;
 const SHIELD = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1.5 13.5 4v4c0 3.2-2.3 5.6-5.5 6.5C4.8 13.6 2.5 11.2 2.5 8V4L8 1.5Z" stroke="currentColor" stroke-width="1.3"></path></svg>`;
@@ -157,10 +159,10 @@ const STUDIO_JS = String.raw `
       }).then(function (r) {
         if (r.ok) { onDone(r); return; }
         return r.json().then(function (j) {
-          if (el) { el.textContent = "[FAIL] " + (j && j.error ? j.error : r.status); el.style.color = "#e28f88"; }
+          if (el) { el.textContent = "[FAIL] " + (j && j.error ? j.error : r.status); el.style.color = "var(--color-fail)"; }
         });
       }).catch(function () {
-        if (el) { el.textContent = "[FAIL] studio server unreachable — restart deepsweep studio --serve"; el.style.color = "#e28f88"; }
+        if (el) { el.textContent = "[FAIL] studio server unreachable — restart deepsweep studio --serve"; el.style.color = "var(--color-fail)"; }
       });
     }
     var wsSelect = document.getElementById("ws-select");
@@ -179,7 +181,7 @@ const STUDIO_JS = String.raw `
   var verify = document.getElementById("verify-inclusion");
   if (verify) verify.addEventListener("click", function () {
     var out = document.getElementById("verify-result");
-    var PASS = "#8fc7a2", WARN = "#dcb475", FAIL = "#e28f88";
+    var PASS = "var(--color-ok)", WARN = "var(--color-warn)", FAIL = "var(--color-fail)";
     var HEX64 = /^[0-9a-f]{64}$/;
     var enc = new TextEncoder();
     function say(text, color) { out.textContent = text; out.style.color = color; }
@@ -319,14 +321,14 @@ function railSurfaceSlot(input) {
         // deliberately NOT in ACQUISITION_CTA_IDS and so deliberately not guarded.
         return ctx?.desktopDetected === true
             ? `<a class="btn btn-ghost" data-cta-id="cta-reveal-in-studio" data-cta-kind="navigation" data-surface="${surface}" style="${RAIL_LINK_STYLE}" href="${STUDIO_REVEAL_DEEPLINK}?root=${encodeURIComponent(esc(liveRoot(input)))}">Reveal in Studio →</a>`
-            : acquisitionCta(ACQUISITION_CTA_IDS.DESKTOP_STUDIO_FROM_IDE, surface, STUDIO_DOWNLOAD_URL, "Open Governance Studio →");
+            : acquisitionCta(ACQUISITION_CTA_IDS.DESKTOP_STUDIO_FROM_IDE, surface, STUDIO_DOWNLOAD_URL, "Open Studio →");
     }
     return acquisitionCta(ACQUISITION_CTA_IDS.DESKTOP_STUDIO, surface, STUDIO_DOWNLOAD_URL, "Get the desktop Studio →");
 }
 function sidebar(input, active) {
     const nav = (id, label) => `<button class="navitem" data-screen="${id}" aria-current="${id === active}">${SHIELD}${label}</button>`;
     return `<div style="width:216px;flex:none;display:flex;flex-direction:column;border-right:1px solid var(--color-divider);background:color-mix(in srgb,var(--color-surface) 45%,var(--color-bg));padding:16px 0 14px">
-  <div style="display:flex;align-items:center;gap:9px;padding:0 16px 14px"><span style="display:flex;width:22px">${DEEPSWEEP_LOGO_SVG}</span><div><div style="font-family:var(--font-heading);font-weight:500;font-size:14px;line-height:1.1">DeepSweep</div><div style="font-size:10px;letter-spacing:.06em;color:var(--color-neutral-600)">GOVERNANCE STUDIO</div></div></div>
+  <div style="display:flex;align-items:center;gap:9px;padding:0 16px 14px"><span style="display:flex;width:22px">${DEEPSWEEP_LOGO_SVG}</span><div><div style="font-family:var(--font-heading);font-weight:500;font-size:14px;line-height:1.1">DeepSweep</div><div style="font-size:10px;letter-spacing:.06em;color:var(--color-neutral-600)">STUDIO</div></div></div>
   <div style="padding:0 16px 6px;font-size:10px;letter-spacing:.1em;color:var(--color-neutral-600)">WORKSPACE</div>
   ${input.serve
         ? `<div style="margin:0 12px 16px;display:flex;flex-direction:column;gap:6px"><input id="ws-input" class="mono" value="${esc(input.workspaceRoot)}" style="width:100%;padding:7px 10px;border-radius:var(--radius-md);border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-size:11px" aria-label="Workspace folder"><button class="btn btn-secondary" id="ws-select" style="font-size:12px">Review this workspace</button><span id="ws-status" class="mono" style="font-size:10.5px;color:var(--color-neutral-500)"></span></div>`
@@ -334,7 +336,7 @@ function sidebar(input, active) {
   <div style="display:flex;flex-direction:column;gap:2px;padding:0 8px">${nav("review", "Review")}${nav("authorize", "Authorize")}${nav("audit", "Audit")}</div>
   <div style="margin-top:auto;padding:14px 16px 0;display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--color-divider)">
     <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-500)"><span>Policy</span><span class="mono">${esc(input.layersLoaded.join("+") || "none")} · ${esc(input.mode)}</span></div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-500)"><span>Chain (as recorded)</span><span class="mono" style="color:${input.chainVerified ? "var(--color-neutral-500)" : "#e28f88"}">${input.chainVerified ? "[PASS]" : "[FAIL]"}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-500)"><span>Chain (as recorded)</span><span class="mono" style="color:${input.chainVerified ? "var(--color-neutral-500)" : "var(--color-fail)"}">${input.chainVerified ? "[PASS]" : "[FAIL]"}</span></div>
     <!-- UNTOUCHED (TEAM-ADR-030 rule 3): DeepSweep GOVERNS Cursor, it does
          not compete with it. This deeplink is correct on every surface and is
          deliberately not an acquisition CTA. -->
@@ -350,7 +352,10 @@ function reviewScreen(input) {
         const gap = report.boundaryGaps.find((g) => g.relatedCapabilityIds?.includes(c.id ?? ""));
         const sev = gap?.severity ?? "info";
         const t = SEV_TOKEN[sev] ?? SEV_TOKEN["info"];
-        return `<tr><td class="mono" style="font-size:12px;color:${t.color}">${t.token}</td><td>${esc(c.summary)}</td><td><span class="tag" style="background:color-mix(in srgb,${t.color} 13%,transparent);color:${t.color}">${esc(sev)}</span></td><td style="color:var(--color-neutral-400)" class="mono" >${esc(c.source)}</td><td style="color:var(--color-neutral-300)">${esc(gap?.recommendation ?? "No open gap for this capability")}</td></tr>`;
+        // C09: the chip reads the STAMPED field — an unstamped item renders
+        // "unlabeled" loudly rather than borrowing a class.
+        const cc = c.claimClass ?? "unlabeled";
+        return `<tr data-claim-class="${esc(cc)}"><td class="mono" style="font-size:12px;color:${t.color}">${t.token}</td><td>${esc(c.summary)} <span class="tag tag-outline mono" style="font-size:9.5px;padding:0 6px;margin-left:6px;color:var(--color-neutral-500)">${esc(cc)}</span></td><td><span class="tag" style="background:color-mix(in srgb,${t.color} 13%,transparent);color:${t.color}">${esc(sev)}</span></td><td style="color:var(--color-neutral-400)" class="mono" >${esc(c.source)}</td><td style="color:var(--color-neutral-300)">${gap ? `<span class="tag tag-outline mono" style="font-size:9.5px;padding:0 6px;margin-right:6px;color:var(--color-neutral-500)">recommendation</span>` : ""}${esc(gap?.recommendation ?? "No open gap for this capability")}</td></tr>`;
     })
         .join("");
     const firstTrust = input.trust[0];
@@ -365,15 +370,16 @@ function reviewScreen(input) {
   <div style="margin-left:auto;display:flex;gap:8px"><button class="btn btn-ghost" id="export-json">Export JSON</button>${input.serve
         ? `<button class="btn btn-primary" id="rerun-live">Re-run review</button>`
         : // TEAM-ADR-027: a static artifact re-runs by opening this workspace in
-            // the Governance Studio — never by pasting a terminal command.
+            // the Studio — never by pasting a terminal command.
             `<button class="btn btn-primary" data-copy="workspace-path">Copy workspace label</button><span id="workspace-path" hidden>${esc(input.workspace)}</span>`}</div></div>
   <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr 1.3fr;gap:12px">
-    <div class="card"><div class="card-kicker">Boundary gaps</div><div style="font-size:24px;font-weight:500;color:${report.totals.critical > 0 ? "#e28f88" : "#8fc7a2"}">${report.totals.boundaryGaps}</div><div class="card-meta">${report.totals.critical} critical · ${report.totals.high} high</div></div>
+    <div class="card"><div class="card-kicker">Boundary gaps</div><div style="font-size:24px;font-weight:500;color:${report.totals.critical > 0 ? "var(--color-fail)" : "var(--color-ok)"}">${report.totals.boundaryGaps}</div><div class="card-meta">${report.totals.critical} critical · ${report.totals.high} high</div></div>
     <div class="card"><div class="card-kicker">Capabilities</div><div style="font-size:24px;font-weight:500">${report.totals.capabilities}</div><div class="card-meta">across ${input.identity.length} agent(s)</div></div>
     <div class="card"><div class="card-kicker">Findings</div><div style="font-size:24px;font-weight:500">${input.findings.length}</div><div class="card-meta">drift + lifecycle</div></div>
     <div class="card"><div class="card-kicker">Warnings</div><div style="font-size:24px;font-weight:500">${report.warnings.length}</div><div class="card-meta">incl. unreadable configs</div></div>
   </div>
   <div style="display:flex;gap:10px;align-items:center"><span style="font-size:10px;letter-spacing:.1em;color:var(--color-neutral-600)">AGENTS FOUND</span>${agents || '<span style="font-size:12px;color:var(--color-neutral-500)">none yet — open this workspace with a coding agent and re-run</span>'}</div>
+  <div id="claim-class-legend" style="font-size:11px;color:var(--color-neutral-500)">Labels: <span class="mono">fact</span> — a configuration read · <span class="mono">inference</span> — reasoned from presence and absence · <span class="mono">recommendation</span> — a suggested action · <span class="mono">forecast</span> — reserved; none emitted by reviews</div>
   <div style="flex:1;min-height:0;display:flex;gap:18px;align-items:flex-start">
     <div style="flex:1;min-width:0"><table class="table"><thead><tr><th style="width:64px">Status</th><th>Capability</th><th style="width:84px">Severity</th><th style="width:170px">Source</th><th style="width:250px">Suggested control</th></tr></thead><tbody>${capRows || '<tr><td colspan="5" style="color:var(--color-neutral-500)">No agent capabilities detected in this workspace.</td></tr>'}</tbody></table></div>
     <div style="width:252px;flex:none;display:flex;flex-direction:column;gap:12px">${posture}
@@ -395,16 +401,17 @@ function authorizeScreen(input) {
             action: "*",
             resource: "*",
         };
-        return `<tr><td><div style="font-size:12.5px">${esc(g.summary)}</div><div style="font-size:11px;color:var(--color-neutral-600)">${g.relatedCapabilities.length} related capabilit${g.relatedCapabilities.length === 1 ? "y" : "ies"}</div></td><td class="mono" style="font-size:11px;color:${t.color}">${t.token} ${esc(g.severity)}</td><td><span class="tag ${effect === "deny" ? "" : "tag-outline"}" style="${effect === "deny" ? "background:rgba(226,143,136,.13);color:#e28f88;border:1px solid rgba(226,143,136,.35)" : ""}">${effect === "deny" ? "Deny" : "Approval"}</span></td><td><button class="btn btn-ghost" style="font-size:12px" data-suggest="${esc(JSON.stringify(suggestion))}">Add to draft →</button></td></tr>`;
+        const gcc = g.claimClass ?? "unlabeled";
+        return `<tr data-claim-class="${esc(gcc)}"><td><div style="font-size:12.5px">${esc(g.summary)} <span class="tag tag-outline mono" style="font-size:9.5px;padding:0 6px;margin-left:6px;color:var(--color-neutral-500)">${esc(gcc)}</span></div><div style="font-size:11px;color:var(--color-neutral-600)">${g.relatedCapabilities.length} related capabilit${g.relatedCapabilities.length === 1 ? "y" : "ies"}</div></td><td class="mono" style="font-size:11px;color:${t.color}">${t.token} ${esc(g.severity)}</td><td><span class="tag ${effect === "deny" ? "" : "tag-outline"}" style="${effect === "deny" ? "background:color-mix(in srgb,var(--color-fail) 13%,transparent);color:var(--color-fail);border:1px solid color-mix(in srgb,var(--color-fail) 35%,transparent)" : ""}">${effect === "deny" ? "Deny" : "Approval"}</span></td><td><button class="btn btn-ghost" style="font-size:12px" data-suggest="${esc(JSON.stringify(suggestion))}">Add to draft →</button></td></tr>`;
     })
         .join("");
     return `<section class="screen" id="screen-authorize" style="flex:1;min-width:0;padding:26px 30px;flex-direction:column;gap:16px;overflow:auto">
   <div style="display:flex;align-items:flex-start;gap:16px"><div><h4>Authorization policy</h4><div style="font-size:12.5px;color:var(--color-neutral-500)">Layers loaded: ${esc(input.layersLoaded.join(" + ") || "none")} · mode ${esc(input.mode)} · docs/policy-format.md has the full grammar</div></div>
   <div style="margin-left:auto;display:flex;gap:8px"><button class="btn btn-primary" data-copy="policy-draft">Copy policy.json draft (<span id="draft-count">0</span> rules)</button></div></div>
-  <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-radius:var(--radius-md);background:var(--color-accent-900);border:1px solid var(--color-accent-800)"><span style="color:var(--color-accent-300)">${SHIELD}</span><div style="font-size:12.5px;color:#e7e5fe"><strong style="font-weight:600">Deny wins.</strong> The draft starts at require-approval for anything unmatched — lower layers can only tighten, never loosen.</div><span class="tag tag-accent" style="margin-left:auto">${esc(input.mode)} mode</span></div>
+  <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-radius:var(--radius-md);background:var(--color-accent-900);border:1px solid var(--color-accent-800)"><span style="color:var(--color-accent-300)">${SHIELD}</span><div style="font-size:12.5px;color:var(--color-text)"><strong style="font-weight:600">Deny wins.</strong> The draft starts at require-approval for anything unmatched — lower layers can only tighten, never loosen.</div><span class="tag tag-accent" style="margin-left:auto">${esc(input.mode)} mode</span></div>
   <div style="flex:1;min-height:0;display:flex;gap:18px;align-items:flex-start">
     <div style="flex:1;min-width:0"><table class="table"><thead><tr><th>Open gap (from this review)</th><th style="width:120px">Severity</th><th style="width:110px">Suggested rule</th><th style="width:130px"></th></tr></thead><tbody>${gapRows || '<tr><td colspan="4" style="color:var(--color-neutral-500)">No open boundary gaps — nothing to tighten. Well-governed workspace.</td></tr>'}</tbody></table>
-    <div style="display:flex;align-items:center;gap:18px;font-size:11.5px;color:var(--color-neutral-500);margin-top:10px"><span><span class="tag" style="background:rgba(143,199,162,.12);color:#8fc7a2;border:1px solid rgba(143,199,162,.3);padding:1px 8px">Allow</span> runs without asking</span><span><span class="tag tag-outline" style="padding:1px 8px">Approval</span> pauses for a human</span><span><span class="tag" style="background:rgba(226,143,136,.13);color:#e28f88;border:1px solid rgba(226,143,136,.35);padding:1px 8px">Deny</span> refused, explained, ledgered</span></div></div>
+    <div style="display:flex;align-items:center;gap:18px;font-size:11.5px;color:var(--color-neutral-500);margin-top:10px"><span><span class="tag" style="background:color-mix(in srgb,var(--color-ok) 12%,transparent);color:var(--color-ok);border:1px solid color-mix(in srgb,var(--color-ok) 30%,transparent);padding:1px 8px">Allow</span> runs without asking</span><span><span class="tag tag-outline" style="padding:1px 8px">Approval</span> pauses for a human</span><span><span class="tag" style="background:color-mix(in srgb,var(--color-fail) 13%,transparent);color:var(--color-fail);border:1px solid color-mix(in srgb,var(--color-fail) 35%,transparent);padding:1px 8px">Deny</span> refused, explained, ledgered</span></div></div>
     <div style="width:340px;flex:none;display:flex;flex-direction:column;gap:10px"><div class="card elev-sm" style="gap:8px"><div class="card-kicker">Draft policy.json (ADR-021 format)</div><pre id="policy-draft" class="mono" style="margin:0;font-size:11px;line-height:1.5;white-space:pre-wrap;max-height:380px;overflow:auto;background:var(--color-bg);border-radius:var(--radius-sm);padding:10px"></pre><div style="font-size:11px;color:var(--color-neutral-500)">Save as <span class="mono">.deepsweep/policy.json</span>, then ask for decisions with <span class="mono">deepsweep authorize</span>. Start in observe mode; enforce when the ledger looks right.</div>${input.serve
         ? `<button class="btn btn-primary btn-block" id="apply-draft">Apply draft as policy.json</button><span id="apply-status" class="mono" style="font-size:10.5px;color:var(--color-neutral-500)"></span>`
         : ""}</div></div>
@@ -424,7 +431,7 @@ function authorizeScreen(input) {
 function commitmentLine(input) {
     const ev = evidenceOf(input);
     if (ev.status === "unsigned") {
-        return `<div style="font-size:11.5px;color:#dcb475">[WARN] ${STUDIO_UNSIGNED_NOTE[ev.reason]}</div>`;
+        return `<div style="font-size:11.5px;color:var(--color-warn)">[WARN] ${STUDIO_UNSIGNED_NOTE[ev.reason]}</div>`;
     }
     const head = ev.evidence.signedTreeHead.treeHead;
     return `<div style="font-size:11.5px;color:var(--color-neutral-500)">Committed root <span class="mono">${head.rootHash.slice(0, 12)}</span> at size ${head.treeSize}, signed <span class="mono">${esc(head.signedAt)}</span> by key <span class="mono">${head.logId}</span>. THIS FILE CANNOT PROVE IT IS THE WHOLE LOG: a head this key genuinely signed EARLIER, presented with only the rows it covers, verifies exactly as green as a current one — so a later entry can be omitted without any failure here. Check the size and date above against the log's anchored head registry; a size smaller than the registry's means rows are missing from this file. Inclusion binds each entry's HASH: a payload key withheld from this projection is not re-derivable from that hash here, so compare a disclosed value against the signed evidence export. The key travels in this file so the check runs offline — it is what is being checked, not why to believe it; compare that key id against the one you already hold.</div>`;
@@ -437,9 +444,9 @@ function auditScreen(input) {
         .map((e) => {
         const outcome = typeof e.payload["outcome"] === "string" ? String(e.payload["outcome"]) : "";
         const badge = outcome === "deny"
-            ? '<span class="tag" style="background:rgba(226,143,136,.13);color:#e28f88">DENY</span>'
+            ? '<span class="tag" style="background:color-mix(in srgb,var(--color-fail) 13%,transparent);color:var(--color-fail)">DENY</span>'
             : outcome === "allow"
-                ? '<span class="tag" style="background:rgba(143,199,162,.12);color:#8fc7a2">ALLOW</span>'
+                ? '<span class="tag" style="background:color-mix(in srgb,var(--color-ok) 12%,transparent);color:var(--color-ok)">ALLOW</span>'
                 : outcome !== ""
                     ? `<span class="tag tag-accent">${esc(outcome.toUpperCase())}</span>`
                     : '<span class="tag tag-neutral">RUN</span>';
@@ -449,11 +456,11 @@ function auditScreen(input) {
         .join("");
     const decisions = entries.filter((e) => e.kind === "policy.decision").length;
     return `<section class="screen" id="screen-audit" style="flex:1;min-width:0;padding:26px 30px;flex-direction:column;gap:16px;overflow:auto">
-  <div style="display:flex;align-items:flex-start;gap:16px"><div><h4>Audit ledger</h4><div style="font-size:12.5px;color:var(--color-neutral-500)">${entries.length} entries · hash-chained locally · on-disk chain when this file was written <span class="mono" style="color:${input.chainVerified ? "var(--color-neutral-500)" : "#e28f88"}">${input.chainVerified ? "[PASS]" : "[FAIL]"}</span> — recorded by the tool, not checked by you here · privacy: decision tuples are stored as hashes, never values</div></div>
+  <div style="display:flex;align-items:flex-start;gap:16px"><div><h4>Audit ledger</h4><div style="font-size:12.5px;color:var(--color-neutral-500)">${entries.length} entries · hash-chained locally · on-disk chain when this file was written <span class="mono" style="color:${input.chainVerified ? "var(--color-neutral-500)" : "var(--color-fail)"}">${input.chainVerified ? "[PASS]" : "[FAIL]"}</span> — recorded by the tool, not checked by you here · privacy: decision tuples are stored as hashes, never values</div></div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px"><span id="verify-result" class="mono" style="font-size:11.5px;color:var(--color-neutral-500)"></span><button class="btn btn-ghost" id="verify-inclusion">Verify inclusion in-browser</button></div></div>
   ${commitmentLine(input)}
   <div style="display:flex;align-items:center;gap:12px"><span class="seg"><button class="seg-opt" data-audit-filter="all" aria-pressed="true">All</button><button class="seg-opt" data-audit-filter="review.run" aria-pressed="false">Reviews</button><button class="seg-opt" data-audit-filter="policy.decision" aria-pressed="false">Decisions</button></span><span class="tag tag-neutral">${decisions} decisions recorded</span><span style="margin-left:auto;font-size:11.5px;color:var(--color-neutral-600)">Showing newest ${Math.min(entries.length, 50)} of ${entries.length}</span></div>
-  <div style="flex:1;min-height:0"><table class="table" style="font-size:13px"><thead><tr><th style="width:56px">Entry</th><th style="width:200px">Recorded</th><th style="width:150px">Kind</th><th style="width:110px">Outcome</th><th>Rule</th><th style="width:110px">Hash</th></tr></thead><tbody>${rows || `<tr><td colspan="6" style="color:${input.ledger === undefined ? "#e28f88" : "var(--color-neutral-500)"}">${input.ledger === undefined ? "[FAIL] Ledger on disk is malformed — appends are refused so the damage stays verifiable against your latest anchor." : "No entries yet — run a review or an authorize decision to start the chain."}</td></tr>`}</tbody></table></div></section>`;
+  <div style="flex:1;min-height:0"><table class="table" style="font-size:13px"><thead><tr><th style="width:56px">Entry</th><th style="width:200px">Recorded</th><th style="width:150px">Kind</th><th style="width:110px">Outcome</th><th>Rule</th><th style="width:110px">Hash</th></tr></thead><tbody>${rows || `<tr><td colspan="6" style="color:${input.ledger === undefined ? "var(--color-fail)" : "var(--color-neutral-500)"}">${input.ledger === undefined ? "[FAIL] Ledger on disk is malformed — appends are refused so the damage stays verifiable against your latest anchor." : "No entries yet — run a review or an authorize decision to start the chain."}</td></tr>`}</tbody></table></div></section>`;
 }
 function plansStrip() {
     // Decluttered (founder directive 2026-08-01): the 4-tile pricing grid is
@@ -476,7 +483,7 @@ function bigTechRow() {
     // ease in with the shell like every section.
     const marks = BIG_TECH_MARKS.map((m) => `<span class="mark">${m.svg}</span>`).join("");
     return `<div class="ease-in bigtech" style="animation-delay:.3s;display:flex;align-items:center;gap:26px;justify-content:center;padding:10px 16px 14px">
-  <span style="font-size:10px;letter-spacing:.08em;color:var(--color-neutral-700)">RUNS WHEREVER YOUR STACK RUNS</span>${marks}
+  <span style="font-size:10px;letter-spacing:.08em;color:var(--color-text-2)">RUNS WHEREVER YOUR STACK RUNS</span>${marks}
 </div>`;
 }
 /** The one sanctioned render call for the Studio artifact (S1.9). */
@@ -513,14 +520,13 @@ export function renderStudio(input) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;${input.serve ? " connect-src 'self';" : ""}">
-<title>DeepSweep Governance Studio — ${esc(input.workspace)}</title>
+<title>DeepSweep Studio — ${esc(input.workspace)}</title>
 <style>${TOKENS_CSS}</style>
 </head>
 <body>
 <div style="min-height:100vh;display:flex;flex-direction:column">
 <div style="height:44px;flex:none;display:flex;align-items:center;padding:0 16px;position:relative;border-bottom:1px solid var(--color-divider)">
-  <div style="display:flex;gap:8px"><span style="width:12px;height:12px;border-radius:50%;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:50%;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:50%;background:#28c840"></span></div>
-  <div style="position:absolute;left:280px;right:280px;text-align:center;font-size:13px;color:var(--color-neutral-500);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">DeepSweep Governance Studio — ${esc(input.workspace)}</div>
+  <div style="position:absolute;left:280px;right:280px;text-align:center;font-size:13px;color:var(--color-neutral-500);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">DeepSweep Studio — ${esc(input.workspace)}</div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-neutral-500)">${SHIELD}Local-first · no code upload · this file works offline</div>
 </div>
 <div style="flex:1;display:flex;min-height:0" class="ease-in">

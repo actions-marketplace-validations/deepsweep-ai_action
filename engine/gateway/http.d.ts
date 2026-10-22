@@ -19,6 +19,12 @@
  * but not parsed for the result hash — recorded honestly as `resultHash` over
  * the raw body with `isError:false` and a `streamed:true` marker. GET/SSE
  * session-open requests are proxied untouched (they carry no tools/call).
+ *
+ * A POST body the gateway cannot decide as one call — a JSON-RPC batch, or a
+ * tools/call that does not name its tool — is answered by the gateway and
+ * never forwarded (TEAM-ADR-068). Since its Addendum 1, so is a body it cannot
+ * parse as UTF-8 JSON (400, -32700), one declared in another charset (415),
+ * and a look-alike of a governed method or key (-32044).
  */
 import { type Server } from "node:http";
 import type { LedgerSigningKey } from "../review/ledger-sign.js";
@@ -47,4 +53,5 @@ export interface HttpGateway {
     };
     close(): Promise<void>;
 }
+export declare function relayableHeaders(headers: Record<string, string | string[] | undefined>, bodyLength?: number, side?: "request" | "response"): Record<string, string | string[]>;
 export declare function startHttpGateway(o: HttpGatewayOptions): Promise<HttpGateway>;

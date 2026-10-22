@@ -36,7 +36,7 @@ export function renderJsonValue(value) {
  * insignificant whitespace, byte-stable across runs and platforms.
  *
  * This is the ONLY sanctioned producer for the headless engine host's stdout:
- * the sidecar's consumers (the Governance Studio over IPC, and the CI runner)
+ * the sidecar's consumers (the Studio over IPC, and the CI runner)
  * hash and diff that stream, so key order is a contract, not a detail.
  * Added to the sanctioned render set deliberately — see the write-site guard
  * in tests/sanitize.test.ts.
@@ -152,7 +152,7 @@ export function renderReport(r) {
     lines.push("Which AI agent is doing what — and should it be allowed to?");
     // External-audience copy only (user-facing-content-integrity): user-visible
     // benefit + next action — no internal repo paths or roadmap pointers.
-    lines.push("Next: open the Governance Studio to watch this environment for drift as it happens and turn these gaps into policy.");
+    lines.push("Next: open the Studio to watch this environment for drift as it happens and turn these gaps into policy.");
     return lines.join("\n");
 }
 function pushWarnings(lines, r) {

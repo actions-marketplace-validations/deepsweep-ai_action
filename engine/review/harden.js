@@ -4,7 +4,7 @@
  * NOT guarantee on this system.
  *
  * THIS IS AN ENGINE LIBRARY FUNCTION, NOT A COMMAND. The CLI is retired as a
- * product surface; the Governance Studio calls this over IPC and renders the
+ * product surface; the Studio calls this over IPC and renders the
  * report verbatim behind a one-click "Harden ledger" action. There is no
  * `harden` verb and there must never be one.
  *

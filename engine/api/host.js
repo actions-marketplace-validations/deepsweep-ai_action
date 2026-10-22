@@ -3,7 +3,7 @@
  *
  * The DeepSweep CLI is retired as a PRODUCT SURFACE. What survives is a
  * headless binary with exactly two consumers:
- *   (a) the Governance Studio, which spawns it as a bundled sidecar;
+ *   (a) the Studio, which spawns it as a bundled sidecar;
  *   (b) the CI runner, which executes the same artifact.
  * It is never installed on PATH, never symlinked, never a documented user
  * command.
@@ -31,6 +31,7 @@ import { isTemplateId } from "../compliance/templates.js";
 import { generateStudioArtifact, writeStudioArtifact } from "./studio.js";
 import { isSurface } from "../review/surface.js";
 import { ledgerTimeline } from "./timeline.js";
+import { AUTONOMY_PRESETS } from "../review/presets.js";
 import { ACTION_VOCABULARY } from "../review/policy.js";
 import { sha256Hex } from "../review/canonical.js";
 import { BaselineRefusalError } from "../review/baseline.js";
@@ -52,6 +53,7 @@ export const HOST_COMMANDS = [
     "authorize",
     "export",
     "packet",
+    "presets",
     "review",
     "studio",
     "timeline",
@@ -59,7 +61,7 @@ export const HOST_COMMANDS = [
 ];
 /** One line of machine-readable help — the sidecar has no marketing surface. */
 export const HOST_HELP_LINE = "JSON request on stdin (schema: docs/engine-host-protocol.md); internal component of " +
-    "DeepSweep Governance Studio; not a supported standalone interface.";
+    "DeepSweep Studio; not a supported standalone interface.";
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 /** Shape AND semantics: "2026-13-45T99:99:99Z" is ISO-shaped but not a time. */
 function isInstant(value) {
@@ -294,6 +296,12 @@ function dispatch(command, params, nowIso) {
                 exitCode: 0,
             };
         }
+        case "presets":
+            // C20 (2026-09-17): the five autonomy presets, served so a surface can
+            // OFFER them. Serving is not applying -- writing one into a workspace
+            // stays the operator's explicit act, and the engine re-validates any
+            // policy at load regardless of its origin.
+            return { result: { presets: AUTONOMY_PRESETS }, exitCode: 0 };
         /* v8 ignore next -- reason: exhaustive over HOST_COMMANDS; TS proves the default unreachable. */
         case "timeline":
             return { result: ledgerTimeline({ workspaceRoot: requiredString(params, "workspaceRoot") }), exitCode: 0 };

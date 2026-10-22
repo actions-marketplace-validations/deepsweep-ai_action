@@ -12,9 +12,9 @@
  *    workspace posture at a glance)
  * Fixed allowlist per ADR-002/ADR-014 — no globbing, names only for dirs.
  */
-import { exists, parseTolerantJson, probeRead, probeReadUser } from "../read.js";
+import { parseTolerantJson, probeRead, probeReadUser } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { dirNamesOrWarn, isBlankDocument, malformedWarning, mcpCredentialDetail, mcpServersFrom, nameList, unreadableWarning, visibleNames, } from "./util.js";
+import { asRecord, dirNamesOrWarn, inspect, isBlankDocument, jsonInspection, malformedWarning, mcpCredentialDetail, mcpServersFrom, nameList, presentOrRecord, unreadableWarning, visibleNames, } from "./util.js";
 import { countNoun } from "../text.js";
 const RULES_FILE = ".windsurfrules";
 const RULES_DIR = ".windsurf/rules";
@@ -25,7 +25,7 @@ const GLOBAL_MCP_CONFIG_REL = ".codeium/windsurf/mcp_config.json";
 const GLOBAL_MCP_CONFIG_LABEL = "~/.codeium/windsurf/mcp_config.json";
 function detect(workspaceRoot, ctx) {
     const out = emptyResult();
-    if (exists(workspaceRoot, RULES_FILE)) {
+    if (presentOrRecord(out, workspaceRoot, RULES_FILE)) {
         out.reviewedSources.push(RULES_FILE);
         out.capabilities.push({
             kind: "agentInstructions",
@@ -34,7 +34,7 @@ function detect(workspaceRoot, ctx) {
             source: RULES_FILE,
         });
     }
-    const ruleFiles = visibleNames(dirNamesOrWarn(workspaceRoot, RULES_DIR, out.warnings));
+    const ruleFiles = visibleNames(dirNamesOrWarn(workspaceRoot, RULES_DIR, out));
     if (ruleFiles.length > 0) {
         out.reviewedSources.push(RULES_DIR);
         out.capabilities.push({
@@ -45,7 +45,7 @@ function detect(workspaceRoot, ctx) {
             detail: { fileCount: ruleFiles.length, fileNames: nameList(ruleFiles) },
         });
     }
-    const workflows = visibleNames(dirNamesOrWarn(workspaceRoot, WORKFLOWS_DIR, out.warnings));
+    const workflows = visibleNames(dirNamesOrWarn(workspaceRoot, WORKFLOWS_DIR, out));
     if (workflows.length > 0) {
         out.reviewedSources.push(WORKFLOWS_DIR);
         out.capabilities.push({
@@ -61,10 +61,12 @@ function detect(workspaceRoot, ctx) {
     const mcpProbe = probeRead(workspaceRoot, MCP_CONFIG);
     if (mcpProbe.status === "unreadable") {
         out.warnings.push(unreadableWarning(MCP_CONFIG, mcpProbe.reason));
+        inspect(out, MCP_CONFIG, "unreadable", "workspace", mcpProbe.reason);
     }
     else if (mcpProbe.status === "ok") {
         out.reviewedSources.push(MCP_CONFIG);
         const json = parseTolerantJson(mcpProbe.text);
+        inspect(out, MCP_CONFIG, jsonInspection(mcpProbe.text, asRecord(json) !== undefined), "workspace");
         if (json === undefined) {
             // An empty file is nothing configured, not malformed — the guard
             // nests here so the else-branch keeps its type narrowing.
@@ -106,10 +108,12 @@ function detect(workspaceRoot, ctx) {
         : { status: "absent" };
     if (globalProbe.status === "unreadable") {
         out.warnings.push(unreadableWarning(GLOBAL_MCP_CONFIG_LABEL, globalProbe.reason));
+        inspect(out, GLOBAL_MCP_CONFIG_LABEL, "unreadable", "user", globalProbe.reason);
     }
     else if (globalProbe.status === "ok") {
         out.reviewedSources.push(GLOBAL_MCP_CONFIG_LABEL);
         const json = parseTolerantJson(globalProbe.text);
+        inspect(out, GLOBAL_MCP_CONFIG_LABEL, jsonInspection(globalProbe.text, asRecord(json) !== undefined), "user");
         if (json === undefined) {
             // An empty file is nothing configured, not malformed — the guard
             // nests here so the else-branch keeps its type narrowing.

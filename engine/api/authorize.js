@@ -54,6 +54,7 @@ export function authorizeAction(params) {
         attestation: "claimed",
         driftOutstanding: false,
         ...(classification !== null ? { resourceAliases: classification.aliases } : {}),
+        ...(params.callArgs !== undefined ? { callArgs: params.callArgs } : {}),
     });
     // A refused PRIMARY layer (org/workspace) poisons the whole evaluation:
     // ADR-010 maps it to the safe default, never to allow.
@@ -69,18 +70,34 @@ export function authorizeAction(params) {
     // byte-identical to pre-041 when no pack is installed. Binding IDS stay
     // in-process (AuthorizeResult.classification.bindings): they would name the
     // vendor class the customer runs, which the hash-only record never did.
-    const appended = appendLedgerEntry(root, "policy.decision", {
-        principalHash: sha256Hex(decision.principal ?? ""),
-        actionHash: sha256Hex(decision.action),
-        resourceHash: sha256Hex(decision.resource),
-        outcome: decision.outcome,
-        rule: ruleLabel,
-        mode: layered.mode,
-        ...(packLabels.length > 0 ? { packs: packLabels.join(",") } : {}),
-        ...(classification !== null ? { classes: classification.classes.join(","), classification: classification.confidence } : {}),
-    }, params.nowIso);
+    let appended;
+    try {
+        appended = appendLedgerEntry(root, "policy.decision", {
+            principalHash: sha256Hex(decision.principal ?? ""),
+            actionHash: sha256Hex(decision.action),
+            resourceHash: sha256Hex(decision.resource),
+            outcome: decision.outcome,
+            rule: ruleLabel,
+            mode: layered.mode,
+            ...(packLabels.length > 0 ? { packs: packLabels.join(",") } : {}),
+            ...(classification !== null ? { classes: classification.classes.join(","), classification: classification.confidence } : {}),
+        }, params.nowIso);
+    }
+    catch (e) {
+        if (params.onRecordFailure === undefined)
+            throw e;
+        params.onRecordFailure(e, undefined);
+        appended = "corrupt";
+    }
     if (appended !== "corrupt" && params.key !== undefined) {
-        appendLedgerSignature(root, signLedgerEntry(appended, params.key));
+        try {
+            appendLedgerSignature(root, signLedgerEntry(appended, params.key));
+        }
+        catch (e) {
+            if (params.onRecordFailure === undefined)
+                throw e;
+            params.onRecordFailure(e, appended);
+        }
     }
     const enforcing = layered.mode === "enforce";
     return {
@@ -91,6 +108,7 @@ export function authorizeAction(params) {
         layersLoaded: layered.layersLoaded,
         mode: layered.mode,
         ruleLabel,
+        ...(decision.requiredApprovals !== undefined ? { requiredApprovals: decision.requiredApprovals } : {}),
         outcome: decision.outcome,
         actedOn: enforcing ? acted : null,
         refusals,

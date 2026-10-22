@@ -1,5 +1,5 @@
 /**
- * ADR-023 — Governance Studio LIVE mode: `deepsweep studio --serve`.
+ * ADR-023 — Studio LIVE mode: `deepsweep studio --serve`.
  *
  * A zero-dependency node:http server that brings the studio to life:
  * workspace selection, explicit re-review, and one-click apply of the

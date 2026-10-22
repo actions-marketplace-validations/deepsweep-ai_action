@@ -12,8 +12,8 @@
  * rules, same names-only discipline — and a family added tomorrow cannot
  * quietly omit a step. Existing detectors are deliberately left as they are.
  */
-import { exists, parseTolerantJson, probeDirNames, probeRead, probeReadUser, } from "../read.js";
-import { isBlankDocument, malformedWarning, mcpCredentialDetail, mcpServersFrom, nameList, unreadableWarning, visibleNames, } from "./util.js";
+import { parseTolerantJson, probeDirNames, probeRead, probeReadUser, } from "../read.js";
+import { asRecord, directoryUnreadableWarning, inspect, isBlankDocument, jsonInspection, malformedWarning, mcpCredentialDetail, mcpServersFrom, nameList, presentOrRecord, unreadableWarning, visibleNames, } from "./util.js";
 import { countNoun } from "../text.js";
 /** Emit mcpToolAccess (+ shellExecution for local launchers) for a standard mcpServers map. */
 export function emitMcpServers(json, source, out, opts) {
@@ -53,12 +53,14 @@ export function emitMcpServers(json, source, out, opts) {
 export function reviewJsonMcpSource(probe, source, out, opts) {
     if (probe.status === "unreadable") {
         out.warnings.push(unreadableWarning(source, probe.reason));
+        inspect(out, source, "unreadable", opts.scope, probe.reason);
         return undefined;
     }
     if (probe.status !== "ok")
         return undefined;
     out.reviewedSources.push(source);
     const json = parseTolerantJson(probe.text);
+    inspect(out, source, jsonInspection(probe.text, asRecord(json) !== undefined), opts.scope);
     if (json === undefined) {
         // An empty file is nothing configured, not malformed.
         if (!isBlankDocument(probe.text))
@@ -86,14 +88,17 @@ export function reviewUserMcpJson(userConfigRoot, rel, label, out, tool, reach) 
 /** Names-only review of a rules/config directory → one agentInstructions capability. */
 export function reviewRulesDir(root, rel, label, out, opts) {
     const probe = probeDirNames(root, rel);
+    const scope = opts.scope ?? "workspace";
     if (probe.status === "unreadable") {
         if (!out.warnings.some((w) => w.source === label)) {
-            out.warnings.push(unreadableWarning(label, probe.reason));
+            out.warnings.push(directoryUnreadableWarning(label, probe.reason));
         }
+        inspect(out, label, "unreadable", scope, probe.reason);
         return [];
     }
     if (probe.status !== "ok")
         return [];
+    inspect(out, label, probe.truncated ? "listed_partial" : "listed", scope);
     const names = visibleNames(probe.names);
     if (names.length === 0)
         return [];
@@ -113,7 +118,7 @@ export function reviewRulesDir(root, rel, label, out, opts) {
 }
 /** Presence-only review of an instruction/config FILE → one capability (content never summarised). */
 export function reviewPresence(workspaceRoot, rel, out, capability) {
-    if (!exists(workspaceRoot, rel))
+    if (!presentOrRecord(out, workspaceRoot, rel))
         return false;
     out.reviewedSources.push(rel);
     out.capabilities.push({

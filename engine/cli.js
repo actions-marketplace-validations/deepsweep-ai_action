@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * LEGACY COMPATIBILITY SHIM — the DeepSweep CLI is retired as a product
- * surface (TEAM-ADR-027). The Governance Studio is the supported interface;
+ * surface (TEAM-ADR-027). The Studio is the supported interface;
  * the headless engine host (src/engine-host.ts) is the machine one.
  *
  * This file exists for exactly one reason: an early user who already pinned
@@ -53,7 +53,7 @@ const NOW_ISO = new Date().toISOString();
  * the work. It never changes an exit code and never turns a verb into a
  * no-op: a pinned install keeps working exactly as it did.
  */
-console.error(renderNoticeLine("the command line is no longer a supported DeepSweep interface — this build still works; the Governance Studio is at https://deepsweep.ai/download"));
+console.error(renderNoticeLine("the command line is no longer a supported DeepSweep interface — this build still works; the Studio is at https://deepsweep.ai/download"));
 if (cmd === "authorize") {
     // ADR-021 exit vocabulary: 0 allow (or observe MODE) · 1 usage ·
     // 3 require-approval (incl. the ADR-010 safe default) · 4 deny.
@@ -281,7 +281,7 @@ if (cmd === "studio") {
             toolVersion: toolVersion(),
             userConfigRoot: USER_CONFIG_ROOT,
         });
-        console.log(renderNoticeLine(`Governance Studio live at ${studioServer.url} (local-only, this session's token in the URL) — Ctrl-C to stop`));
+        console.log(renderNoticeLine(`Studio live at ${studioServer.url} (local-only, this session's token in the URL) — Ctrl-C to stop`));
         if (openAfter) {
             const opener = process.platform === "darwin" ? "open" : "xdg-open";
             execFile(opener, [studioServer.url], () => {
@@ -312,7 +312,7 @@ if (cmd === "studio") {
         written = resolve(outPath);
         writeFileSync(written, artifact.html);
     }
-    console.log(renderNoticeLine(`Governance Studio written: ${written} — open it in any browser; it works offline`));
+    console.log(renderNoticeLine(`Studio written: ${written} — open it in any browser; it works offline`));
     if (openAfter) {
         const opener = process.platform === "darwin" ? "open" : "xdg-open";
         execFile(opener, [written], () => {
@@ -325,7 +325,7 @@ if (cmd !== "review") {
     // Operator reference only — no banner art, no taglines, no upsell, no
     // pricing, no install instructions (TEAM-ADR-027 forbids reintroducing any
     // of them here). Static text only, no interpolation (S1.9 guard).
-    console.log(`Retired interface. The Governance Studio is the supported DeepSweep interface: https://deepsweep.ai/download
+    console.log(`Retired interface. The Studio is the supported DeepSweep interface: https://deepsweep.ai/download
 
 Usage: deepsweep review [path] [--json] [--watch] [--update-baseline]
                        [--fail-on critical|high|none] [--fail-on-drift]

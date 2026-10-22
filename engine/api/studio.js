@@ -1,7 +1,7 @@
 /**
  * Engine library — `studio` capability (TEAM-ADR-027).
  *
- * The Governance Studio artifact (ADR-022) is now produced by a library
+ * The Studio artifact (ADR-022) is now produced by a library
  * function that the Tauri Studio, the headless sidecar and the legacy CLI
  * shim all share. The assembly step was already a library function
  * (`assembleStudioInput`, ADR-023); the CLI kept a SECOND hand-rolled copy of

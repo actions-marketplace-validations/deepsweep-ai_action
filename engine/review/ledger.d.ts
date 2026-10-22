@@ -27,8 +27,20 @@
 import { type KeyObject } from "node:crypto";
 import { type ProofVerdict } from "../evidence/merkle.js";
 import { type TrustedKey } from "./bundle.js";
+import { type StoreUnreadableCause } from "./store.js";
 export declare const LEDGER_FILE = "ledger.jsonl";
 export declare const GENESIS_PREV: string;
+/**
+ * The ledger's own read cap, 64 MiB (TEAM-ADR-069 Decision 1c). The store's
+ * 1,000,000-byte cap (MAX_FILE_BYTES) exists for files an agent can shape
+ * that the review reads; applied to the ledger, it made every ledger past
+ * 1 MB read as EMPTY, so the next append restarted the chain at seq 0 and
+ * every reader saw no history at all. A forwarded gateway call writes about
+ * 1.8 KB (decision, call and result entries, measured), so that happened
+ * after roughly 550 calls; this cap holds roughly 36,000. Past it the ledger
+ * is refused as unreadable, never read as empty.
+ */
+export declare const LEDGER_MAX_BYTES: number;
 /** One ledger entry. `payload` is metadata-only by producer contract. */
 export interface LedgerEntry {
     readonly seq: number;
@@ -90,12 +102,146 @@ export declare class LedgerRefusalError extends Error {
     constructor(reason: string);
 }
 export declare function hashEntry(entry: Omit<LedgerEntry, "entryHash">): string;
-/** Parse + structurally validate the ledger file. Malformed → undefined. */
+/** Why a ledger that exists could not be read as one (TEAM-ADR-069). */
+export type LedgerUnreadableCause = "malformed" | StoreUnreadableCause;
+/**
+ * The ledger as found on disk. `ok` with no entries means the ledger has not
+ * been written yet; a ledger that exists and cannot be read is `unreadable`,
+ * never empty.
+ */
+export type LedgerRead = {
+    readonly status: "ok";
+    readonly entries: LedgerEntry[];
+} | {
+    readonly status: "unreadable";
+    readonly cause: LedgerUnreadableCause;
+};
+/** Read and structurally validate the ledger, saying why when it cannot be read. Throws only for store-containment violations. */
+export declare function inspectLedger(workspaceRoot: string): LedgerRead;
+/** The ledger file's absolute path, for an operator's diagnostic. No containment check: it names the file, it does not open it. */
+export declare function ledgerPath(workspaceRoot: string): string;
+/**
+ * The index of the first entry that starts the chain over (seq 0 with the
+ * genesis prevHash) anywhere but at the start, or undefined (TEAM-ADR-069 fix
+ * pass 1, M3). A structural check only: cheap enough for every summary. Such
+ * a ledger can never export, whoever wrote the restart.
+ */
+export declare function ledgerRestartIndex(entries: readonly LedgerEntry[]): number | undefined;
+/**
+ * True when the restart at `index` has exactly the shape builds before
+ * TEAM-ADR-069 wrote (fix pass 1, M3; tightened by fix pass 2, M-3):
+ *  - everything before it is one chain that verifies, and takes more than
+ *    1,000,000 bytes (the old read cap, past which the ledger read as empty);
+ *  - from `index` on, EVERY entry is a self-hashing genesis entry, because
+ *    each later append by such a build also read the ledger as empty;
+ *  - except that the entries after those may be one continuation that a
+ *    current build appended (it reads the whole ledger, so it chains from the
+ *    last restart entry: seq equal to its position, prevHash the previous
+ *    entry's hash), and that continuation must verify to the end.
+ * Fix pass 1 checked only the restart entry, so an edit after it, or one
+ * entry of a never-restarted ledger rewritten as a genesis entry, exported as
+ * "restarted by an earlier version" (the round-2 review). Anything else that
+ * breaks the chain is reported as an edit. Stated residual: someone who
+ * rewrites EVERY entry from some point on as a self-hashing genesis entry
+ * produces this shape; the chain alone never detected a rewritten tail
+ * (ADR-018), which signatures and anchors exist for.
+ */
+export declare function isEarlierBuildRestart(entries: readonly LedgerEntry[], index: number): boolean;
+/**
+ * Parse + structurally validate the ledger file. A ledger that is malformed,
+ * over LEDGER_MAX_BYTES, or otherwise unreadable → undefined; an absent one
+ * → []. (Before TEAM-ADR-069 an oversized or unreadable ledger returned [],
+ * which appendLedgerEntry then extended from genesis.)
+ */
 export declare function readLedger(workspaceRoot: string): LedgerEntry[] | undefined;
 /** Verify internal hash-chain integrity (detects edits, not replacement). */
 export declare function verifyChain(entries: readonly LedgerEntry[]): boolean;
-/** Append one entry — O(1) contained fd append (ADR-018 hot-path
- * amendment; see appendStoreLine for the documented durability trade). */
+/** What an append needs to know about the ledger: how many entries, the newest one, the newest of each kind, its size, and whether an earlier build restarted it. */
+export interface LedgerSummary {
+    readonly count: number;
+    readonly head: LedgerEntry | undefined;
+    readonly lastOfKind: ReadonlyMap<string, LedgerEntry>;
+    /** The ledger file's size in bytes when summarised (0 when absent). */
+    readonly bytes: number;
+    /** See ledgerRestartIndex. */
+    readonly restartedAt: number | undefined;
+}
+export type LedgerSummaryRead = {
+    readonly status: "ok";
+    readonly summary: LedgerSummary;
+} | {
+    readonly status: "unreadable";
+    readonly cause: LedgerUnreadableCause;
+};
+/** Why an append was refused: the ledger cannot be read, or it has no room for this entry under LEDGER_MAX_BYTES. */
+export type LedgerAppendRefusal = LedgerUnreadableCause | "full";
+/**
+ * The ledger's count, newest entry, newest entry of each kind, size and
+ * restart point, or why it cannot be read (TEAM-ADR-069). Validates the whole
+ * ledger exactly as readLedger does whenever the file has changed since the
+ * last summary this process took or wrote; otherwise answers from that
+ * summary.
+ */
+export declare function summarizeLedger(workspaceRoot: string): LedgerSummaryRead;
+/** The advisory lock file every appender takes around read-then-append (TEAM-ADR-069 fix pass 1, M5). */
+export declare const LEDGER_LOCK_FILE = "ledger.lock";
+/**
+ * Where a pid means something (TEAM-ADR-069 fix pass 2, M-1): the host name,
+ * and on Linux the PID namespace (`/proc/self/ns/pid`, for example
+ * `pid:[4026531836]`). A gateway in a container is PID 1 in its own
+ * namespace, and cannot see the pids of another container's processes, so a
+ * pid from a lock written elsewhere says nothing about whether its holder is
+ * alive. Elsewhere than Linux there are no PID namespaces: null. On Linux, a
+ * namespace that cannot be read is "unknown", which matches nothing.
+ */
+export interface LockPlace {
+    readonly host: string;
+    readonly pidNs: string | null;
+}
+/** This process's place, given the platform and a way to read a symlink (parameters so both platforms' branches are tested on either). */
+export declare function lockPlaceOf(host: string, platform: NodeJS.Platform, readlink: (path: string) => string): LockPlace;
+/**
+ * Run `fn` holding the ledger's advisory lock (TEAM-ADR-069 fix pass 1, M5;
+ * fix pass 2, M-1 and M-2). Two gateways on one workspace (the quick start's
+ * default: one per MCP server) each read the ledger's head and appended the
+ * next seq; without a lock they forked the chain (the review measured 345
+ * duplicate seqs in 1,200 entries). The lock is a file created with O_EXCL
+ * holding a LockToken: a random nonce, the pid, and the host and PID
+ * namespace the pid belongs to. A waiter backs off from 50 µs to 2 ms, and
+ * after LOCK_WAIT_MS throws ELOCKED, which the gateway reports as "could not
+ * be recorded". staleLockFound says when a lock is stale; breakStaleLock
+ * breaks one; the release removes the lock only if it is still this
+ * acquisition's own. If the token cannot be written, the empty lock just
+ * created is removed before the error is thrown (M-2): left behind, it made
+ * every call wait and be refused until it was 30 s old.
+ *
+ * Advisory: a writer that does not take it (an older build, a hand edit) is
+ * not stopped by it. Residuals, stated in the ADR: a holder stalled past
+ * LOCK_STALE_MS can be broken while still inside its critical section; two
+ * machines with the same host name and PID-namespace identity sharing a
+ * workspace are taken for one; and the rare put-back described at
+ * breakStaleLock.
+ */
+export declare function withLedgerLock<T>(workspaceRoot: string, fn: () => T, refuseWith?: (reason: string) => Error): T;
+/**
+ * Append one entry, or say why not (TEAM-ADR-069). O(1) contained fd append
+ * (ADR-018 hot-path amendment; see appendStoreLine for the durability
+ * trade). Refused, and nothing written: a ledger that cannot be read, and an
+ * entry that would take the file past LEDGER_MAX_BYTES (fix pass 1, M1: the
+ * ledger never grows past the size every reader accepts, so it stays
+ * exportable). Throws only for store failures: containment refusals, and
+ * write errors including a short write (B1).
+ */
+export declare function appendLedgerEntryOrRefuse(workspaceRoot: string, kind: string, payload: Record<string, string | number | boolean>, nowIso: string): {
+    readonly entry: LedgerEntry;
+} | {
+    readonly refused: LedgerAppendRefusal;
+};
+/**
+ * Append one entry. A refusal (see appendLedgerEntryOrRefuse) is the
+ * "corrupt" sentinel, which every caller already surfaces loudly. Throws
+ * only for store failures.
+ */
 export declare function appendLedgerEntry(workspaceRoot: string, kind: string, payload: Record<string, string | number | boolean>, nowIso: string): LedgerEntry | "corrupt";
 /** The anchored facts — hashes and counts ONLY, never event contents. */
 export interface AnchorRecord {

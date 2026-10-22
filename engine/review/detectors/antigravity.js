@@ -27,9 +27,9 @@
  * confirms it — see
  * `deepsweep-knowledge/research/antigravity-trae-detector-surfaces.md`.
  */
-import { exists, parseTolerantJson, probeDirNames, probeRead, probeReadUser } from "../read.js";
+import { parseTolerantJson, probeDirNames, probeRead, probeReadUser } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { isBlankDocument, malformedWarning, mcpCredentialDetail, mcpServersFrom, unreadableWarning, } from "./util.js";
+import { asRecord, inspect, isBlankDocument, jsonInspection, malformedWarning, mcpCredentialDetail, mcpServersFrom, presentOrRecord, unreadableWarning, } from "./util.js";
 const MCP_CONFIG = ".agents/mcp_config.json";
 const CONTEXT_FILE = "GEMINI.md";
 /** USER-SCOPE paths, relative to the injected user root (ADR-014). */
@@ -38,6 +38,7 @@ const USER_MCP_LABEL = "~/.gemini/config/mcp_config.json";
 const OAUTH_DIR_REL = ".gemini/antigravity";
 const OAUTH_TOKEN_NAME = "mcp_oauth_tokens.json";
 const OAUTH_TOKEN_LABEL = "~/.gemini/antigravity/mcp_oauth_tokens.json";
+const OAUTH_DIR_LABEL = "~/.gemini/antigravity";
 /** Shared by the workspace and user-scope passes so the two cannot drift. */
 function emitMcpCapabilities(json, source, out, scope) {
     for (const server of mcpServersFrom(json)) {
@@ -70,7 +71,7 @@ function emitMcpCapabilities(json, source, out, scope) {
 function detect(workspaceRoot, ctx) {
     const out = emptyResult();
     // --- project context -----------------------------------------------------
-    if (exists(workspaceRoot, CONTEXT_FILE)) {
+    if (presentOrRecord(out, workspaceRoot, CONTEXT_FILE)) {
         out.reviewedSources.push(CONTEXT_FILE);
         out.capabilities.push({
             kind: "agentInstructions",
@@ -83,10 +84,12 @@ function detect(workspaceRoot, ctx) {
     const mcpProbe = probeRead(workspaceRoot, MCP_CONFIG);
     if (mcpProbe.status === "unreadable") {
         out.warnings.push(unreadableWarning(MCP_CONFIG, mcpProbe.reason));
+        inspect(out, MCP_CONFIG, "unreadable", "workspace", mcpProbe.reason);
     }
     else if (mcpProbe.status === "ok") {
         out.reviewedSources.push(MCP_CONFIG);
         const json = parseTolerantJson(mcpProbe.text);
+        inspect(out, MCP_CONFIG, jsonInspection(mcpProbe.text, asRecord(json) !== undefined), "workspace");
         if (json === undefined) {
             // An empty file is nothing configured, not malformed — the guard
             // nests here so the else-branch keeps its type narrowing.
@@ -103,10 +106,12 @@ function detect(workspaceRoot, ctx) {
         : { status: "absent" };
     if (userMcp.status === "unreadable") {
         out.warnings.push(unreadableWarning(USER_MCP_LABEL, userMcp.reason));
+        inspect(out, USER_MCP_LABEL, "unreadable", "user", userMcp.reason);
     }
     else if (userMcp.status === "ok") {
         out.reviewedSources.push(USER_MCP_LABEL);
         const json = parseTolerantJson(userMcp.text);
+        inspect(out, USER_MCP_LABEL, jsonInspection(userMcp.text, asRecord(json) !== undefined), "user");
         if (json === undefined) {
             // An empty file is nothing configured, not malformed — the guard
             // nests here so the else-branch keeps its type narrowing.
@@ -128,8 +133,17 @@ function detect(workspaceRoot, ctx) {
     // finding. Only the name is ever observed.
     if (ctx.userConfigRoot !== undefined) {
         const probe = probeDirNames(ctx.userConfigRoot, OAUTH_DIR_REL);
+        // The token store is found by listing its folder and never opened. The
+        // folder's own record says how complete that listing was, whether or not
+        // the name was found; a folder that cannot be listed is a limitation even
+        // though no warning is raised (X-583 P3).
+        if (probe.status === "unreadable")
+            inspect(out, OAUTH_DIR_LABEL, "unreadable", "user", probe.reason);
+        else if (probe.status === "ok")
+            inspect(out, OAUTH_DIR_LABEL, probe.truncated ? "listed_partial" : "listed", "user");
         if (probe.status === "ok" && probe.names.includes(OAUTH_TOKEN_NAME)) {
             out.reviewedSources.push(OAUTH_TOKEN_LABEL);
+            inspect(out, OAUTH_TOKEN_LABEL, "presence_only", "user");
             out.capabilities.push({
                 kind: "secretsExposure",
                 summary: "Antigravity stores MCP OAuth access tokens on disk in the user profile, readable by any agent with user-scope file access",

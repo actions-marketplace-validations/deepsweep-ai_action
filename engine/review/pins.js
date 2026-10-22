@@ -160,6 +160,7 @@ function definitionWarnings(name, source, def) {
             if (ENDPOINT_SHAPED_KEY.test(key)) {
                 out.push({
                     source,
+                    code: "pin-advisory",
                     summary: `MCP server "${name}": its target appears to be configured via ${field} key "${key}" — that value is redacted before pinning, so changes to it will not raise drift. Review the value directly when re-pinning.`,
                 });
             }
@@ -171,6 +172,7 @@ function definitionWarnings(name, source, def) {
             if (typeof arg === "string" && looksSecretShaped(arg)) {
                 out.push({
                     source,
+                    code: "pin-advisory",
                     summary: `MCP server "${name}": argument #${i + 1} matches secret-shaped patterns — its value is redacted before pinning, so changes to it will not raise drift; prefer env for secret values.`,
                 });
             }
@@ -185,6 +187,7 @@ function definitionWarnings(name, source, def) {
         if (raw !== undefined && urlCarriesSecrets(raw)) {
             out.push({
                 source,
+                code: "pin-advisory",
                 summary: `MCP server "${name}": its ${field} embeds credentials or query parameters — userinfo and query are stripped before pinning, so changes to them will not raise drift (scheme, host and path still do); move secrets to env/headers.`,
             });
         }
@@ -195,6 +198,7 @@ function definitionWarnings(name, source, def) {
 function ephemeralKeyWarning(source) {
     return {
         source,
+        code: "pin-advisory",
         summary: "Pinned identities were computed under a temporary key because no durable key store was reachable — the baseline will be discarded and regenerated on the next run. Set DEEPSWEEP_PIN_KEY (or make the state directory writable) to keep pinned trust state across runs.",
     };
 }
@@ -231,6 +235,7 @@ export function extractPins(workspaceRoot, key = resolvePinKey()) {
         if (dups.length > 0) {
             warnings.push({
                 source: rel,
+                code: "pin-advisory",
                 summary: `Duplicate JSON ${dups.length === 1 ? "key" : "keys"} in ${rel} (${dups.join(", ")}) — parsing is deterministic last-wins, but duplicate definitions deserve review.`,
             });
         }

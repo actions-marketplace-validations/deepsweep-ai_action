@@ -7,7 +7,7 @@
  * derivations plus a ninth inside the review.run ledger payload — and shipped
  * that basename in CLEARTEXT into artifacts a customer hands to a third
  * party: the evidence bundle (top level AND every record), the compliance
- * packet (once per timeline row), the Governance Studio artifact, the
+ * packet (once per timeline row), the Studio artifact, the
  * `--watch --json` drift-event stream. A repo basename is the client's
  * product name. A regulated buyer — a hospital EHR vendor, a claims
  * processor, a licensed money transmitter — reads that as information

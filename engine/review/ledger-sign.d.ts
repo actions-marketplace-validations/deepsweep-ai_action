@@ -32,7 +32,7 @@
  * WHERE THE KEY LIVES
  * -------------------
  * OUTSIDE agent-readable paths. The documented default is the OS KEYCHAIN,
- * supplied by the desktop Governance Studio, which owns keychain integration.
+ * supplied by the desktop Studio, which owns keychain integration.
  * This engine has ZERO third-party runtime dependencies and node:crypto has no
  * keychain binding, so the engine does NOT reach the keychain: it defines the
  * injection seam (`LedgerSigningKey`) and the host supplies a signer.
@@ -103,10 +103,18 @@ export declare function signLedgerEntry(entry: LedgerEntry, key: LedgerSigningKe
 /** Sign a whole ledger (backfill / re-key). Order follows the entries. */
 export declare function signLedger(entries: readonly LedgerEntry[], key: LedgerSigningKey): LedgerEntrySignature[];
 /** Append one signature line to the sidecar (contained, O(1), same discipline
- * as the ledger append itself). */
+ * as the ledger append itself). It holds the ledger lock (re-entrant, so free
+ * inside a gateway decision), and a write that fails part-way is rolled back
+ * (TEAM-ADR-069 fix pass 2, M-4): a torn signature line made the whole
+ * sidecar unreadable, so every signature, not one, stopped verifying. If a
+ * torn line could not be rolled back, the next signature starts on a new
+ * line, so it is not glued onto the torn one (fix pass 3, R3-4). */
 export declare function appendLedgerSignature(workspaceRoot: string, sig: LedgerEntrySignature): void;
 /** Parse the sidecar. Malformed -> undefined (never a partial, never a throw
- * outside containment violations) so the caller can refuse loudly. */
+ * outside containment violations) so the caller can refuse loudly. A sidecar
+ * that exists but cannot be read (over LEDGER_MAX_BYTES, or a read error) is
+ * undefined too, never "no signatures": read as empty, a signed ledger would
+ * downgrade to "unsigned" in silence (TEAM-ADR-069). Absent -> []. */
 export declare function readLedgerSignatures(workspaceRoot: string): LedgerEntrySignature[] | undefined;
 export type LedgerTamperClass = "edited" | "forged" | "truncated" | "reordered" | "untrusted-key" | "head-refused" | "signature-gap" | "malformed-signature";
 /**

@@ -1,7 +1,7 @@
 /**
- * ADR-022 — Governance Studio: the three-screen desktop-shell artifact
+ * ADR-022 — Studio: the three-screen desktop-shell artifact
  * (Review · Authorize · Audit) generated as ONE self-contained HTML file
- * from the "Governance Studio Mockups" design (Nocturne design system).
+ * from the "Studio Mockups" design (Nocturne design system).
  *
  * NON-NEGOTIABLES, inherited and enforced here:
  *  - REAL DATA ONLY. Every number, row, badge, and verdict comes from this

@@ -6,7 +6,7 @@
  */
 import { parseTolerantJson, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { asRecord, asString, isBlankDocument, malformedWarning, unreadableWarning } from "./util.js";
+import { asRecord, asString, inspect, isBlankDocument, jsonInspection, malformedWarning, unreadableWarning } from "./util.js";
 const DEVCONTAINER_PATHS = [".devcontainer/devcontainer.json", ".devcontainer.json"];
 /** Docker feature ids that grant daemon-level (privileged-equivalent) control. */
 const PRIVILEGED_FEATURE_MARKERS = [
@@ -107,10 +107,12 @@ function detect(workspaceRoot) {
             continue;
         if (probe.status === "unreadable") {
             out.warnings.push(unreadableWarning(rel, probe.reason));
+            inspect(out, rel, "unreadable", "workspace", probe.reason);
             continue;
         }
         out.reviewedSources.push(rel);
         const json = asRecord(parseTolerantJson(probe.text));
+        inspect(out, rel, jsonInspection(probe.text, json !== undefined));
         if (json === undefined) {
             // An empty file is nothing configured, not malformed — the guard
             // nests here so the else-branch keeps its type narrowing.

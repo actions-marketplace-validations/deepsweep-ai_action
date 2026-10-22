@@ -18,6 +18,120 @@ import { createHash } from "node:crypto";
 export function sha256Hex(text) {
     return createHash("sha256").update(text, "utf8").digest("hex");
 }
+/** The canonical text is handed to the hash in pieces of about this many UTF-16 code units. */
+const CANONICAL_FLUSH_UNITS = 65536;
+function put(sink, piece) {
+    sink.pending += piece;
+    if (sink.pending.length >= CANONICAL_FLUSH_UNITS) {
+        sink.hash.update(sink.pending, "utf8");
+        sink.pending = "";
+    }
+}
+/**
+ * Write one value: a scalar whole, or the opening of a container whose
+ * members writeCanonical then walks. Throws what canonicalize() throws.
+ */
+function openValue(value, sink, open) {
+    if (value === null) {
+        put(sink, "null");
+        return;
+    }
+    switch (typeof value) {
+        case "boolean":
+            put(sink, value ? "true" : "false");
+            return;
+        case "number":
+            if (!Number.isFinite(value)) {
+                throw new TypeError("Cannot canonicalize non-finite number");
+            }
+            put(sink, JSON.stringify(value));
+            return;
+        case "string":
+            put(sink, JSON.stringify(value));
+            return;
+        case "object":
+            if (Array.isArray(value)) {
+                put(sink, "[");
+                open.push({ kind: "array", items: value, next: 0 });
+                return;
+            }
+            put(sink, "{");
+            open.push({ kind: "object", rec: value, keys: Object.keys(value).sort(), next: 0, first: true });
+            return;
+        default:
+            throw new TypeError(`Cannot canonicalize value of type ${typeof value}`);
+    }
+}
+/**
+ * canonicalize(), written piece by piece, with an explicit stack of open
+ * containers instead of recursion (TEAM-ADR-069 fix pass 9, R9-3): no
+ * nesting depth can overflow the call stack. Members are visited in
+ * canonicalize()'s order, so the text is the same and so is the first throw;
+ * where canonicalize() itself overflows its stack, this still writes the text
+ * canonicalize() would have built. Every piece is a whole token, so no
+ * surrogate pair is ever split between two updates.
+ */
+function writeCanonical(root, sink) {
+    const open = [];
+    openValue(root, sink, open);
+    while (open.length > 0) {
+        const top = open[open.length - 1];
+        if (top.kind === "array") {
+            if (top.next >= top.items.length) {
+                put(sink, "]");
+                open.pop();
+                continue;
+            }
+            const i = top.next;
+            top.next += 1;
+            if (i > 0)
+                put(sink, ",");
+            // A hole writes nothing, as Array.prototype.map and join do in canonicalize().
+            if (!(i in top.items))
+                continue;
+            const v = top.items[i];
+            openValue(v === undefined ? null : v, sink, open);
+            continue;
+        }
+        // The next member whose value is defined, as canonicalize() skips undefined ones.
+        let member;
+        while (member === undefined && top.next < top.keys.length) {
+            const key = top.keys[top.next];
+            top.next += 1;
+            const v = top.rec[key];
+            if (v !== undefined)
+                member = { key, value: v };
+        }
+        if (member === undefined) {
+            put(sink, "}");
+            open.pop();
+            continue;
+        }
+        if (!top.first)
+            put(sink, ",");
+        top.first = false;
+        put(sink, `${JSON.stringify(member.key)}:`);
+        openValue(member.value, sink, open);
+    }
+}
+/**
+ * sha256Hex(canonicalize(value)), without building the canonical string
+ * (TEAM-ADR-069 fix pass 8): the canonical text goes to the hash in pieces of
+ * about 64 Ki code units, so memory no longer grows with the number of values
+ * (a 2.8-million-value result made millions of temporary strings). The same
+ * digest and the same throws as the two-step form for every input the
+ * two-step form can hash; nested past the depth where canonicalize()
+ * overflows its stack, it still returns the digest of the text canonicalize()
+ * would have built (fix pass 9). The value must be acyclic, as JSON.parse
+ * output always is: on a cycle the walk grows until the heap runs out, where
+ * the recursive forms threw a RangeError (fix pass 10).
+ */
+export function sha256Canonical(value) {
+    const sink = { hash: createHash("sha256"), pending: "" };
+    writeCanonical(value, sink);
+    sink.hash.update(sink.pending, "utf8");
+    return sink.hash.digest("hex");
+}
 /**
  * Canonicalize a parsed-JSON value into a deterministic string.
  * Throws on values that cannot appear in parsed JSON (functions, symbols,

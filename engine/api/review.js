@@ -3,7 +3,7 @@
  *
  * Formerly reachable only through the `deepsweep review` command layer. The
  * composition (one-shot review + trust composites + ADR-006/ADR-012 exit-code
- * gating) now lives HERE so the Governance Studio (over Tauri IPC), the
+ * gating) now lives HERE so the Studio (over Tauri IPC), the
  * headless sidecar, and the legacy CLI shim all call the SAME function with
  * identical semantics.
  *
