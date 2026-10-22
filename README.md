@@ -159,8 +159,9 @@ what it covers. For PHP that means a `composer.json` or `.php-version` file, or 
 Dockerfile built `FROM` a `php` image, at the top level or one folder down.
 
 You get one block in the job summary and one notice on the run, each with the title, the
-fix and a link to the full bulletin with its sources. A repository the bulletin does not
-cover sees nothing.
+fix and a link to the full bulletin with its sources. Bulletin text is shown as plain
+text on one line, and the only links it can carry point to deepsweep.ai. A repository the
+bulletin does not cover sees nothing.
 
 It never fails the job. If the file cannot be fetched within 5 seconds, or the response
 is anything other than the version 1 document the action expects, the step prints nothing

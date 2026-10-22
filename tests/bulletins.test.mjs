@@ -16,6 +16,8 @@ import {
   selectBulletins,
   renderSummary,
   renderAnnotation,
+  cleanText,
+  safeUrl,
   run,
 } from "../bulletins/bulletins.mjs";
 
@@ -181,9 +183,10 @@ describe("the 30-day window and severity", () => {
     }
   });
 
-  test("an entry without a title or an https url is skipped", () => {
-    assert.equal(selectBulletins(feedWith([entry({ title: "" })]), php, NOW).length, 0);
-    assert.equal(selectBulletins(feedWith([entry({ url: "http://example.com/x" })]), php, NOW).length, 0);
+  test("an entry without a usable title is skipped", () => {
+    for (const title of ["", "   ", "\n\t\u2028", undefined, 42]) {
+      assert.equal(selectBulletins(feedWith([entry({ title })]), php, NOW).length, 0, JSON.stringify(title));
+    }
   });
 
   test("unknown fields are ignored", () => {
@@ -300,8 +303,8 @@ describe("summary and annotation text", () => {
     const hostile = entry({ title: "a\n::error::b %", actions: ["c\r\n::warning::d"] });
     const line = renderAnnotation(hostile);
     assert.equal(line.split("\n").length, 1);
-    assert.ok(line.includes("a%0A::error::b %25"));
-    assert.ok(line.includes("c%0D%0A::warning::d"));
+    assert.ok(line.includes("a ::error::b %25"));
+    assert.ok(line.includes("c ::warning::d"));
   });
 });
 
@@ -459,5 +462,160 @@ describe("action.yml and README declare the input and the step", () => {
     assert.match(readme, /\| `bulletins` \| `true` \|/);
     assert.match(readme, /advisories\/v1\/feed\.json/);
     assert.doesNotMatch(readme, /makes no outbound calls of its own/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feed text is data. Whatever an entry carries, it renders as one capped,
+// escaped line, and a link only to https on deepsweep.ai.
+// ---------------------------------------------------------------------------
+describe("feed text is untrusted", () => {
+  const php = new Set(["php"]);
+  const one = (overrides) => {
+    const picked = selectBulletins(feedWith([entry(overrides)]), php, NOW);
+    assert.equal(picked.length, 1, "the entry is kept");
+    return picked[0];
+  };
+  const MULTILINE = "Real title\n::set-output name=x::pwned\r\n# heading\n> quote";
+  const BIDI = "safe \u202Etxt.exe\u202C and \u2066isolate\u2069 \u2028sep\u2029 end";
+
+  test("control, separator and bidi characters are stripped and whitespace collapsed", () => {
+    assert.equal(cleanText("a\r\nb\tc\u2028d\u2029e", 100), "a b c d e");
+    assert.equal(cleanText(BIDI, 100), "safe txt.exe and isolate sep end");
+    for (const cp of [0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069]) {
+      assert.equal(cleanText(`x${String.fromCodePoint(cp)}y`, 10), "xy", cp.toString(16));
+    }
+    assert.equal(cleanText("a\u0000b\u0007c\u007fd", 10), "abcd");
+    assert.equal(cleanText("  lots   of\n\n space  ", 100), "lots of space");
+  });
+
+  test("a multi-line title with ::set-output and # heading renders as one escaped line", () => {
+    const e = one({ title: MULTILINE });
+    const md = renderSummary(e);
+    const heading = md.split("\n").find((l) => l.startsWith("### Security bulletin: "));
+    assert.ok(heading.includes("Real title ::set-output name=x::pwned \\# heading \\> quote"), heading);
+    assert.equal(md.split("\n").filter((l) => /^\s*(#|>)/.test(l)).length, 1, "only our own heading starts a line with # or >");
+    const note = renderAnnotation(e);
+    assert.equal(note.split("\n").length, 1);
+    assert.ok(note.startsWith("::notice title=Security bulletin::Real title ::set-output name=x::pwned # heading > quote."));
+  });
+
+  test("a bidi title renders without bidi controls anywhere", () => {
+    const e = one({ title: BIDI, actions: [BIDI] });
+    const bidi = /[\u202A-\u202E\u2066-\u2069\u2028\u2029]/;
+    assert.doesNotMatch(renderSummary(e), bidi);
+    assert.doesNotMatch(renderAnnotation(e), bidi);
+  });
+
+  test("the title is capped at 160 characters and the fix at 300", () => {
+    const e = one({ title: "T".repeat(500), actions: ["F".repeat(10 * 1024)] });
+    const note = renderAnnotation(e);
+    const title = note.slice(note.indexOf("::", 2) + 2).split(". Fix: ")[0];
+    assert.equal(title.length, 160);
+    assert.ok(title.endsWith("\u2026"));
+    const fix = note.split(". Fix: ")[1].split(". https://")[0];
+    assert.equal(fix.length, 300);
+    assert.ok(fix.endsWith("\u2026"));
+    const md = renderSummary(e);
+    assert.ok(md.length < 1000, `summary block is ${md.length} characters`);
+    assert.ok(md.includes(`**Fix:** ${"F".repeat(299)}\u2026`));
+  });
+
+  test("markdown that could inject is escaped in title and fix", () => {
+    const e = one({
+      title: "<img src=x onerror=alert(1)> [click](https://evil.example) `code` ![i](x)",
+      actions: ["- list item <b>bold</b> [x](y)"],
+    });
+    const md = renderSummary(e);
+    assert.doesNotMatch(md, /(^|[^\\])[<>`\[\]]/m, "no unescaped < > ` [ ]");
+    assert.ok(md.includes("\\<img src=x onerror=alert(1)\\>"));
+    assert.ok(md.includes("\\[click\\](https://evil.example)"));
+    assert.ok(md.includes("\\`code\\`"));
+    assert.ok(md.includes("**Fix:** \\- list item \\<b\\>bold\\</b\\> \\[x\\](y)"));
+  });
+
+  test("leading #, >, - and * are escaped so a value cannot open a block", () => {
+    for (const lead of ["#", ">", "-", "*"]) {
+      const md = renderSummary(one({ title: `${lead} start`, actions: [`${lead} fix`] }));
+      assert.ok(md.includes(`### Security bulletin: \\${lead} start`), `${lead} title`);
+      assert.ok(md.includes(`**Fix:** \\${lead} fix`), `${lead} fix`);
+    }
+  });
+
+  test("a javascript: url is never rendered; the text still is", () => {
+    const e = one({ url: "javascript:alert(1)" });
+    const md = renderSummary(e);
+    assert.doesNotMatch(md, /javascript/i);
+    assert.ok(md.includes("### Security bulletin: PHP2Shell"));
+    assert.doesNotMatch(md, /Details and sources/);
+    assert.doesNotMatch(renderAnnotation(e), /javascript/i);
+  });
+
+  test("an http url, or https off deepsweep.ai, is never rendered", () => {
+    for (const url of [
+      "http://deepsweep.ai/blog/x",
+      "https://evil.example/x",
+      "https://deepsweep.ai.evil.example/x",
+      "https://user@deepsweep.ai/x",
+      "https://deepsweep.ai:8443/x",
+    ]) {
+      const e = one({ url });
+      assert.doesNotMatch(renderSummary(e), /Details and sources|evil|http:|8443|user@/, url);
+      assert.ok(renderAnnotation(e).endsWith(`Fix: ${FEED.entries[0].actions[0]}.`), url);
+    }
+  });
+
+  test("safeUrl keeps https links on deepsweep.ai only", () => {
+    assert.equal(safeUrl("https://deepsweep.ai/blog/x"), "https://deepsweep.ai/blog/x");
+    assert.equal(safeUrl("https://www.deepsweep.ai/a?b=c"), "https://www.deepsweep.ai/a?b=c");
+    for (const bad of ["javascript:alert(1)", "http://deepsweep.ai/", "https://evil.example/", "data:text/html,x", "", null, 7, "https://deepsweep.ai/a b\nc"]) {
+      assert.equal(safeUrl(bad), "", JSON.stringify(bad));
+    }
+  });
+
+  test("one malformed entry is dropped and the others still show", () => {
+    const good = entry({ id: "good" });
+    const bad = [
+      entry({ id: "no-title", title: "\n\u202E\t" }),
+      entry({ id: "actions-not-array", actions: "x" }),
+      entry({ id: "affected-weird", affected: [null, 5, { ecosystem: { x: 1 } }, { ecosystem: "php" }] }),
+      Object.defineProperty(entry({ id: "throws" }), "title", {
+        get() {
+          throw new Error("boom");
+        },
+        enumerable: true,
+      }),
+    ];
+    const ids = selectBulletins(feedWith([...bad, good]), php, NOW).map((e) => e.id);
+    assert.ok(ids.includes("good"));
+    assert.ok(!ids.includes("no-title"));
+    assert.ok(!ids.includes("throws"));
+  });
+
+  test("run with every hostile fixture still writes single-line notices and exits cleanly", async () => {
+    const out = [];
+    const summary = path.join(tmpRepo({}), "summary.md");
+    const doc = feedWith([
+      entry({ id: "a", title: MULTILINE }),
+      entry({ id: "b", title: BIDI, actions: ["F".repeat(10 * 1024)] }),
+      entry({ id: "c", url: "javascript:alert(1)" }),
+    ]);
+    const shown = await run({
+      enabled: "true",
+      root: tmpRepo({ "composer.json": "{}" }),
+      summaryPath: summary,
+      now: NOW,
+      fetchImpl: async () =>
+        new Response(JSON.stringify(doc), { status: 200, headers: { "content-type": "application/json" } }),
+      write: (s) => out.push(s),
+    });
+    assert.deepEqual(shown, ["a", "b", "c"]);
+    for (const line of out) {
+      assert.equal(line.split(/[\r\n]/).length, 1);
+      assert.ok(line.length < 700, `notice is ${line.length} characters`);
+    }
+    const md = fs.readFileSync(summary, "utf8");
+    assert.doesNotMatch(md, /javascript|[\u202A-\u202E\u2066-\u2069]/);
+    assert.equal(md.split("\n").filter((l) => /^\s*#/.test(l)).length, 3, "three headings, all ours");
   });
 });

@@ -33,7 +33,16 @@ A step named `Security bulletins` runs after the review, including after a faile
 5. Each shown entry adds one block to `$GITHUB_STEP_SUMMARY` and prints one `::notice`
    annotation, both carrying the title, the first entry of `actions[]` as the fix, and
    the entry `url`. Feed text is escaped so it cannot start another workflow command.
-6. Every failure prints nothing about bulletins. The script catches everything and exits
+6. Feed text is treated as data. Each string is cut to one line: control characters,
+   line and paragraph separators and bidi controls are removed and whitespace is
+   collapsed. The title is capped at 160 characters and the fix at 300. In the summary,
+   backslashes, backticks, angle brackets, square brackets and `#` are escaped, as is a
+   leading `-`, `*`, `+` or `>`, so a value cannot become a heading, list, quote, link,
+   image, code span or HTML. A link is rendered only when it is https on deepsweep.ai
+   with no credentials or port. Otherwise the text is shown without it. An entry with no
+   title left after cleaning, or one that throws while being read, is dropped on its
+   own and the rest still show.
+7. Every failure prints nothing about bulletins. The script catches everything and exits
    0. The step also has `continue-on-error: true` and `|| true`.
 
 No events are sent. The action reports nothing anywhere today, and this does not change

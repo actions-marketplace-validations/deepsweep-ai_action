@@ -114,6 +114,48 @@ export function detectEcosystems(root) {
   return found;
 }
 
+// ---------------------------------------------------------------------------
+// Feed text is data. Every string is cleaned to one capped line before it is
+// rendered, markdown that could change the summary is escaped, and a link is
+// rendered only when it is https on deepsweep.ai.
+// ---------------------------------------------------------------------------
+
+const TITLE_CAP = 160;
+const FIX_CAP = 300;
+// C0 and C1 controls other than whitespace, and the bidi embedding, override
+// and isolate controls. Removed outright.
+const STRIP = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/g;
+
+/** One line: controls removed, CR, LF, tab and line separators to spaces,
+ * whitespace collapsed, at most `cap` characters with an ellipsis. */
+export function cleanText(value, cap) {
+  if (typeof value !== "string") return "";
+  const line = value.replace(STRIP, "").replace(/\s+/g, " ").trim();
+  const chars = Array.from(line);
+  return chars.length <= cap ? line : chars.slice(0, cap - 1).join("").trimEnd() + "\u2026";
+}
+
+/** The url when it is https on deepsweep.ai, with no credentials or port; else "". */
+export function safeUrl(value) {
+  if (typeof value !== "string" || /[\s\u0000-\u001F\u007F]/.test(value)) return "";
+  let u;
+  try {
+    u = new URL(value);
+  } catch {
+    return "";
+  }
+  if (u.protocol !== "https:" || u.username || u.password || u.port) return "";
+  if (u.hostname !== "deepsweep.ai" && !u.hostname.endsWith(".deepsweep.ai")) return "";
+  return u.href;
+}
+
+// Escape what could turn a value into a link, image, code span, raw HTML or
+// heading, and a leading character that could open a list or blockquote.
+function escapeMarkdown(text) {
+  const inline = text.replace(/[\\`<>\[\]#]/g, (c) => "\\" + c);
+  return /^[-*+>]/.test(inline) ? "\\" + inline : inline;
+}
+
 function ecosystemsOf(entry) {
   const list = Array.isArray(entry.affected) ? entry.affected : [];
   return list
@@ -121,61 +163,69 @@ function ecosystemsOf(entry) {
     .filter(Boolean);
 }
 
+/** The display fields of an entry, cleaned. Throws on nothing it can catch. */
+function view(entry) {
+  const fixes = Array.isArray(entry.actions) ? entry.actions : [];
+  const id = entry.matched_ecosystem || ecosystemsOf(entry).find((e) => ECOSYSTEMS[e]);
+  return {
+    title: cleanText(entry.title, TITLE_CAP),
+    fix: cleanText(fixes[0], FIX_CAP),
+    url: safeUrl(entry.url),
+    label: ECOSYSTEMS[id]?.label || "",
+  };
+}
+
 /**
  * The bulletins to show: critical, published less than 30 days before `now`,
- * with a title and an https link, naming an ecosystem the repository uses.
- * Unknown fields and unknown severities are ignored. At most three.
+ * with a title left after cleaning, naming an ecosystem the repository uses.
+ * Unknown fields and unknown severities are ignored. An entry that fails any
+ * check, or throws while being read, is dropped on its own. At most three.
  */
 export function selectBulletins(doc, repoEcosystems, now = new Date()) {
   if (!doc || !Array.isArray(doc.entries)) return [];
   const out = [];
   for (const entry of doc.entries) {
-    if (!entry || typeof entry !== "object") continue;
-    if (entry.severity !== "critical") continue;
-    if (typeof entry.title !== "string" || !entry.title.trim()) continue;
-    if (typeof entry.url !== "string" || !entry.url.startsWith("https://")) continue;
-    const published = Date.parse(entry.published_at);
-    if (!Number.isFinite(published)) continue;
-    if (now.getTime() - published >= WINDOW_MS) continue;
-    const hit = ecosystemsOf(entry).find((e) => repoEcosystems.has(e) && ECOSYSTEMS[e]);
-    if (!hit) continue;
-    out.push({ ...entry, matched_ecosystem: hit });
+    try {
+      if (!entry || typeof entry !== "object") continue;
+      if (entry.severity !== "critical") continue;
+      if (!cleanText(entry.title, TITLE_CAP)) continue;
+      const published = Date.parse(entry.published_at);
+      if (!Number.isFinite(published)) continue;
+      if (now.getTime() - published >= WINDOW_MS) continue;
+      const hit = ecosystemsOf(entry).find((e) => repoEcosystems.has(e) && ECOSYSTEMS[e]);
+      if (!hit) continue;
+      out.push({ ...entry, matched_ecosystem: hit });
+    } catch {
+      continue;
+    }
     if (out.length === MAX_SHOWN) break;
   }
   return out;
 }
 
-function fixLine(entry) {
-  const first = Array.isArray(entry.actions) ? entry.actions[0] : undefined;
-  return typeof first === "string" && first.trim() ? first.trim() : "";
-}
-
-function labelOf(entry) {
-  const id = entry.matched_ecosystem || ecosystemsOf(entry).find((e) => ECOSYSTEMS[e]);
-  return ECOSYSTEMS[id]?.label || "";
-}
-
 /** One block for the job summary. */
 export function renderSummary(entry) {
-  const lines = ["", `### Security bulletin: ${entry.title}`, ""];
-  const label = labelOf(entry);
-  if (label) lines.push(`This repository uses ${label}, which this bulletin covers.`, "");
-  const fix = fixLine(entry);
-  if (fix) lines.push(`**Fix:** ${fix}`, "");
-  lines.push(`Details and sources: ${entry.url}`, "");
+  const v = view(entry);
+  const lines = ["", `### Security bulletin: ${escapeMarkdown(v.title)}`, ""];
+  if (v.label) lines.push(`This repository uses ${v.label}, which this bulletin covers.`, "");
+  if (v.fix) lines.push(`**Fix:** ${escapeMarkdown(v.fix)}`, "");
+  if (v.url) lines.push(`Details and sources: ${v.url}`, "");
   return lines.join("\n");
 }
 
 // Workflow command data escaping, so feed text cannot end the line and start
-// another command.
+// another command. The text is already one line; this is the second guard.
 function escapeData(s) {
   return String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 }
 
 /** One `::notice` annotation line. */
 export function renderAnnotation(entry) {
-  const fix = fixLine(entry);
-  const message = fix ? `${entry.title}. Fix: ${fix}. ${entry.url}` : `${entry.title}. ${entry.url}`;
+  const v = view(entry);
+  const parts = [v.title];
+  if (v.fix) parts.push(`Fix: ${v.fix}`);
+  let message = parts.join(". ") + ".";
+  if (v.url) message += ` ${v.url}`;
   return `::notice title=Security bulletin::${escapeData(message)}`;
 }
 
