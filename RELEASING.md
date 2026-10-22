@@ -56,6 +56,15 @@ under `src/deepsweep/reporters/` is ever wanted as a reference.
 The engine bundled here is plumbing: never on `PATH`, never symlinked, never a
 command a human is told to type. That is what keeps it on the right side of the line.
 
+## Before every release: run the tests
+
+```bash
+node --test tests/*.test.mjs
+```
+
+Node built-ins only, no install. They cover the security bulletins step
+(`bulletins/bulletins.mjs`, docs/adr/0001-security-bulletins.md).
+
 ## Before every release: is the engine still current?
 
 ```bash

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://deepsweep.ai/advisories/v1/schema.json",
+  "version": 1,
+  "generated_at": "2026-10-22T12:00:00Z",
+  "feed_url": "https://deepsweep.ai/advisories",
+  "status_url": "https://deepsweep.ai/advisories/status",
+  "entries": [
+    {
+      "id": "2026-10-21-php2shell",
+      "url": "https://deepsweep.ai/blog/php2shell-two-critical-php-flaws",
+      "published_at": "2026-10-21T22:50:00Z",
+      "updated_at": "2026-10-22T07:07:00Z",
+      "last_checked_at": "2026-10-22T07:07:00Z",
+      "severity": "critical",
+      "title": "PHP2Shell: two critical PHP core RCEs, patch to 8.5.12 / 8.4.27 / 8.3.36 / 8.2.35",
+      "summary": "CVE-2026-109618 and CVE-2026-109619, CVSS 9.2, unauthenticated remote code execution in PHP itself. Fixes released 21 Oct 2026; backports exist for 7.4, 8.0 and 8.1; PHP says there are no complete mitigations. Early attack attempts reported.",
+      "actions": [
+        "Update PHP to 8.5.12, 8.4.27, 8.3.36 or 8.2.35",
+        "On older branches take your vendor's backport",
+        "Managed hosting: confirm the serving build with your provider"
+      ],
+      "affected": [
+        {
+          "ecosystem": "php",
+          "package": "php",
+          "kind": "runtime",
+          "versions": [
+            {
+              "branch": "8.5",
+              "fixed": "8.5.12",
+              "remedy": "upgrade"
+            },
+            {
+              "branch": "8.4",
+              "fixed": "8.4.27",
+              "remedy": "upgrade"
+            },
+            {
+              "branch": "8.3",
+              "fixed": "8.3.36",
+              "remedy": "upgrade"
+            },
+            {
+              "branch": "8.2",
+              "fixed": "8.2.35",
+              "remedy": "upgrade"
+            },
+            {
+              "branch": "8.1",
+              "fixed": null,
+              "remedy": "vendor_backport"
+            },
+            {
+              "branch": "8.0",
+              "fixed": null,
+              "remedy": "vendor_backport"
+            },
+            {
+              "branch": "7.4",
+              "fixed": null,
+              "remedy": "vendor_backport"
+            }
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "label": "PHP security advisory",
+          "url": "https://www.php.net/archive/2026.php",
+          "primary": true,
+          "fact_checked": true
+        },
+        {
+          "label": "BleepingComputer",
+          "url": "https://www.bleepingcomputer.com/news/security/php-ships-emergency-patches-for-critical-php2shell-flaws/",
+          "primary": false,
+          "fact_checked": true
+        },
+        {
+          "label": "Help Net Security",
+          "url": "https://www.helpnetsecurity.com/2026/10/21/php2shell-php-vulnerabilities-patched-cve-2026-109618-cve-2026-109619/",
+          "primary": false,
+          "fact_checked": true
+        }
+      ],
+      "what_we_changed": {
+        "status": "shipped",
+        "rule_id": "DS-SC-002",
+        "tracking_id": "advisory-check:2026-10-21-php2shell",
+        "released_in": "2.0.55"
+      },
+      "updates": [
+        {
+          "at": "2026-10-22T07:07:00Z",
+          "text": "DeepSweep now flags projects pinned to an unfixed PHP release. The check reads composer.json, .php-version, Dockerfile php images and GitHub Actions php-version values, and gives the fixed release for each branch. It ships in the VS Code extension, version 2.0.55."
+        }
+      ],
+      "community_sourced": false,
+      "contributors": []
+    }
+  ],
+  "commitments": [
+    {
+      "id": "fact-checked-updates",
+      "label": "Fact-checked against primary sources. Updated as the event unfolds. Every change is dated.",
+      "status": "met",
+      "evidence_url": "https://deepsweep.ai/advisories",
+      "met_since": "2026-10-21",
+      "updated_at": "2026-10-21T22:50:00Z"
+    },
+    {
+      "id": "product-checks",
+      "label": "A DeepSweep check ships with each advisory where one applies.",
+      "status": "met",
+      "evidence_url": "https://open-vsx.org/extension/deepsweep-ai/deepsweep/2.0.55",
+      "met_since": "2026-10-22",
+      "updated_at": "2026-10-22T07:07:00Z"
+    },
+    {
+      "id": "community",
+      "label": "Anyone can report a security event or correct an entry, with its primary source.",
+      "status": "met",
+      "evidence_url": "https://deepsweep.ai/advisories/contribute",
+      "met_since": "2026-10-22",
+      "updated_at": "2026-10-22T12:00:00Z"
+    },
+    {
+      "id": "api",
+      "label": "An advisories API so checks update without a release.",
+      "status": "in_progress",
+      "evidence_url": null,
+      "met_since": null,
+      "updated_at": "2026-10-21T22:50:00Z"
+    }
+  ]
+}

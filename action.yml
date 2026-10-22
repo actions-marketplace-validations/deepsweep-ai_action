@@ -44,6 +44,10 @@ inputs:
     description: 'Post a comment on pull requests with results (true/false)'
     required: false
     default: 'true'
+  bulletins:
+    description: 'Show a critical security bulletin from deepsweep.ai when it covers something this repository uses, such as PHP (true/false). Never fails the job.'
+    required: false
+    default: 'true'
 
 outputs:
   grade:
@@ -283,6 +287,24 @@ runs:
             exit 1
           fi
         fi
+
+    # ------------------------------------------------------------------
+    # Security bulletins. One GET of the public advisories document
+    # (5 s timeout, no redirects, status 200, application/json, version 1).
+    # A critical bulletin from the last 30 days that covers an ecosystem
+    # found in `path` becomes one job summary block and one notice. Any
+    # failure prints nothing about bulletins. It runs after a failed gate
+    # too, and it can never fail the job: continue-on-error, `|| true`,
+    # and the script itself always exits 0.
+    # ------------------------------------------------------------------
+    - name: Security bulletins
+      if: ${{ !cancelled() && inputs.bulletins == 'true' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        DS_BULLETINS: ${{ inputs.bulletins }}
+        DS_PATH: ${{ inputs.path }}
+      run: node "${{ github.action_path }}/bulletins/bulletins.mjs" || true
 
     # ------------------------------------------------------------------
     # THE VIRAL SURFACE. A PR comment is how every other contributor on a
