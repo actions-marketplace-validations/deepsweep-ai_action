@@ -8,7 +8,10 @@
  *
  * Usage:
  *   deepsweep-gateway stdio --name <server> [--workspace <dir>] [--principal <id>] -- <command> [args…]
- *   deepsweep-gateway approve <token> [--workspace <dir>] [--approver <who>]
+ *   deepsweep-gateway approve <token> --approver <who> [--workspace <dir>]
+ *   deepsweep-gateway kill [--workspace <dir>] [--actor <who>]
+ *   deepsweep-gateway resume [--workspace <dir>] [--actor <who>]
+ *   deepsweep-gateway drill [--workspace <dir>] [--actor <who>]
  *   deepsweep-gateway revoke <token> [--workspace <dir>] [--revoker <who>]
  *   deepsweep-gateway repin --name <server> --tool <tool> [--workspace <dir>] [--approver <who>]
  *   deepsweep-gateway http --name <server> --upstream <url> [--host 127.0.0.1] [--port 0] [--workspace <dir>] [--principal <id>] [--key-file <pem>]
@@ -21,7 +24,9 @@ import { createPrivateKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderCanonicalJson, renderNoticeLine } from "./review/report.js";
-import { approveToken, revokeToken } from "./gateway/approval.js";
+import { approveByHash, approveToken, listPendingApprovals, revokeToken } from "./gateway/approval.js";
+import { activateKillswitch, deactivateKillswitch, runKillswitchDrill } from "./gateway/killswitch.js";
+import { decideFrame } from "./gateway/decide.js";
 import { startStdioGateway } from "./gateway/stdio.js";
 import { startHttpGateway } from "./gateway/http.js";
 import { repinTool } from "./gateway/toolpins.js";
@@ -87,7 +92,12 @@ else if (verb === "approve") {
         process.stderr.write("usage: deepsweep-gateway approve <token> [--workspace <dir>] [--approver <who>]\n");
         process.exit(1);
     }
-    const r = approveToken(workspace, token, flag(argv, "--approver") ?? "operator", new Date().toISOString(), keyFromArgv(argv));
+    const approver = (flag(argv, "--approver") ?? "").trim();
+    if (approver.length === 0) {
+        process.stderr.write("usage: deepsweep-gateway approve <token> --approver <who> [--workspace <dir>]\n--approver is REQUIRED: a grant with no named grantor is not a grant.\n");
+        process.exit(1);
+    }
+    const r = approveToken(workspace, token, approver, new Date().toISOString(), keyFromArgv(argv));
     console.log(renderCanonicalJson({ ok: r.ok, status: r.status }));
     process.exitCode = r.ok ? 0 : 4;
 }
@@ -108,11 +118,60 @@ else if (verb === "repin") {
         process.stderr.write("usage: deepsweep-gateway repin --name <server> --tool <tool> [--workspace <dir>] [--approver <who>]\n");
         process.exit(1);
     }
-    const r = repinTool(workspace, name, tool, flag(argv, "--approver") ?? "operator", new Date().toISOString(), keyFromArgv(argv));
+    const repinApprover = (flag(argv, "--approver") ?? "").trim();
+    if (repinApprover.length === 0) {
+        process.stderr.write("usage: deepsweep-gateway repin --name <server> --tool <tool> --approver <who> [--workspace <dir>]\n--approver is REQUIRED: re-trusting a drifted tool is a grant, and a grant with no named grantor is not a grant.\n");
+        process.exit(1);
+    }
+    const r = repinTool(workspace, name, tool, repinApprover, new Date().toISOString(), keyFromArgv(argv));
     console.log(renderCanonicalJson(r));
     process.exitCode = r.ok ? 0 : 4;
 }
+else if (verb === "approvals") {
+    // The approval card's read: pending records, hashes only.
+    console.log(renderCanonicalJson({ pending: listPendingApprovals(workspace, new Date().toISOString()) }));
+    process.exitCode = 0;
+}
+else if (verb === "grant") {
+    // The approval card's write: grant BY TOKEN HASH. Only the agent holding
+    // the one-time plaintext token can redeem, so this releases exactly the
+    // bound call. Same integrity gate as approve (named, never the proposer).
+    const th = argv[1];
+    const approver = (flag(argv, "--approver") ?? "").trim();
+    if (th === undefined || approver.length === 0) {
+        process.stderr.write("usage: deepsweep-gateway grant <tokenHash> --approver <who> [--workspace <dir>]\n");
+        process.exit(1);
+    }
+    const r = approveByHash(workspace, th, approver, new Date().toISOString(), keyFromArgv(argv));
+    console.log(renderCanonicalJson({ ok: r.ok, status: r.status }));
+    process.exitCode = r.ok ? 0 : 4;
+}
+else if (verb === "kill" || verb === "resume") {
+    const actor = flag(argv, "--actor") ?? "operator";
+    const r = verb === "kill"
+        ? activateKillswitch(workspace, actor, new Date().toISOString(), keyFromArgv(argv))
+        : deactivateKillswitch(workspace, actor, new Date().toISOString(), keyFromArgv(argv));
+    console.log(renderCanonicalJson({ killswitch: verb === "kill" ? "on" : "off", ledger: r === "corrupt" ? "corrupt" : "recorded" }));
+    process.exitCode = r === "corrupt" ? 2 : 0;
+}
+else if (verb === "drill") {
+    // The drill proves the PRODUCTION refusal path: a synthetic tools/call
+    // through the real decideFrame while the switch is thrown. A drill that
+    // does not observe a refusal reports NOT_REFUSED and exits 5.
+    const actor = flag(argv, "--actor") ?? "operator";
+    // The probe's refusal is recorded like any other (TEAM-ADR-069), so it is
+    // signed with the same key as the drill's own entries: an unsigned entry
+    // between signed ones would read as a signature gap.
+    const key = keyFromArgv(argv);
+    const probe = () => {
+        const d = decideFrame({ method: "tools/call", id: "drill-1", params: { name: "__deepsweep_drill__", arguments: {} } }, { workspaceRoot: workspace, serverName: "__drill__", principal: null, nowIso: new Date().toISOString(), key });
+        return d.kind === "reject" && d.reason === "killed";
+    };
+    const r = runKillswitchDrill(workspace, actor, new Date().toISOString(), probe, () => Date.now(), key);
+    console.log(renderCanonicalJson({ outcome: r.outcome, elapsedMs: r.elapsedMs, restored: r.restored }));
+    process.exitCode = r.exitCode;
+}
 else {
-    process.stderr.write("usage: deepsweep-gateway <stdio|http|approve|revoke|repin> ...\n");
+    process.stderr.write("usage: deepsweep-gateway <stdio|http|approve|grant|approvals|revoke|repin|kill|resume|drill> ...\n");
     process.exit(1);
 }

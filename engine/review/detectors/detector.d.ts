@@ -7,7 +7,9 @@
  * boundary-gap derivation stays centralized in the engine so gaps can relate
  * capabilities across detector families.
  */
-import type { Capability, Protection, ReviewWarning } from "../types.js";
+import type { Capability, Protection, ReviewWarning, SourceInspection } from "../types.js";
+/** One observation of one source, stamped at the read (TEAM-ADR-072). */
+export type DetectorInspection = Omit<SourceInspection, "detectors">;
 export interface DetectorResult {
     /** Sources this detector found and reviewed (workspace-relative). */
     reviewedSources: string[];
@@ -21,6 +23,8 @@ export interface DetectorResult {
     protections: Protection[];
     /** Malformed/unrecognized sources, degraded to warnings (never a crash). */
     warnings: ReviewWarning[];
+    /** How far each source this detector touched was inspected (TEAM-ADR-072). */
+    inspections: DetectorInspection[];
 }
 /**
  * Per-run detection context (ADR-014). `userConfigRoot` anchors USER-SCOPE

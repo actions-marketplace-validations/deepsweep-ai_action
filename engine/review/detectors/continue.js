@@ -13,7 +13,7 @@
 import { probeReadUser } from "../read.js";
 import { emptyResult } from "./detector.js";
 import { reviewPresence, reviewRulesDir } from "./family.js";
-import { unreadableWarning } from "./util.js";
+import { inspect, unreadableWarning } from "./util.js";
 const TOOL = "Continue";
 const CONFIG_YAML = ".continue/config.yaml";
 const CONFIG_JSON = ".continue/config.json";
@@ -48,9 +48,11 @@ function detect(workspaceRoot, ctx) {
         const probe = probeReadUser(ctx.userConfigRoot, USER_CONFIG_REL);
         if (probe.status === "unreadable") {
             out.warnings.push(unreadableWarning(USER_CONFIG_LABEL, probe.reason));
+            inspect(out, USER_CONFIG_LABEL, "unreadable", "user", probe.reason);
         }
         else if (probe.status === "ok") {
             out.reviewedSources.push(USER_CONFIG_LABEL);
+            inspect(out, USER_CONFIG_LABEL, "presence_only", "user");
             out.capabilities.push({
                 kind: "agentInstructions",
                 summary: "Continue user config sets models, rules and tools for agent sessions in EVERY workspace",

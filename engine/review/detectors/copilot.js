@@ -15,9 +15,9 @@
  *    as a key-name-only agentInstructions presence.)
  * Fixed allowlist per ADR-002/ADR-014 — no globbing, names only for dirs.
  */
-import { exists, parseTolerantJson, probeRead } from "../read.js";
+import { parseTolerantJson, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { asRecord, dirNamesOrWarn, nameList, unreadableWarning, visibleNames } from "./util.js";
+import { asRecord, dirNamesOrWarn, inspect, jsonInspection, nameList, presentOrRecord, unreadableWarning, visibleNames } from "./util.js";
 import { countNoun } from "../text.js";
 const INSTRUCTIONS_FILE = ".github/copilot-instructions.md";
 const INSTRUCTIONS_DIR = ".github/instructions";
@@ -32,7 +32,7 @@ const COPILOT_CHAT_PREFIX = "github.copilot.chat.";
 const AUTO_APPROVE_SHAPED = /(autoApprove|autoAccept|agent\.|terminal|experimental\.agent)/i;
 function detect(workspaceRoot) {
     const out = emptyResult();
-    if (exists(workspaceRoot, INSTRUCTIONS_FILE)) {
+    if (presentOrRecord(out, workspaceRoot, INSTRUCTIONS_FILE)) {
         out.reviewedSources.push(INSTRUCTIONS_FILE);
         out.capabilities.push({
             kind: "agentInstructions",
@@ -41,7 +41,7 @@ function detect(workspaceRoot) {
             source: INSTRUCTIONS_FILE,
         });
     }
-    const scoped = visibleNames(dirNamesOrWarn(workspaceRoot, INSTRUCTIONS_DIR, out.warnings)).filter((n) => n.endsWith(".instructions.md"));
+    const scoped = visibleNames(dirNamesOrWarn(workspaceRoot, INSTRUCTIONS_DIR, out)).filter((n) => n.endsWith(".instructions.md"));
     if (scoped.length > 0) {
         out.reviewedSources.push(INSTRUCTIONS_DIR);
         out.capabilities.push({
@@ -53,7 +53,7 @@ function detect(workspaceRoot) {
         });
     }
     for (const rel of SETUP_WORKFLOWS) {
-        if (!exists(workspaceRoot, rel))
+        if (!presentOrRecord(out, workspaceRoot, rel))
             continue;
         out.reviewedSources.push(rel);
         out.capabilities.push({
@@ -71,9 +71,13 @@ function detect(workspaceRoot) {
     const settingsProbe = probeRead(workspaceRoot, VSCODE_SETTINGS);
     if (settingsProbe.status === "unreadable") {
         out.warnings.push(unreadableWarning(VSCODE_SETTINGS, settingsProbe.reason));
+        inspect(out, VSCODE_SETTINGS, "unreadable", "workspace", settingsProbe.reason);
     }
     else if (settingsProbe.status === "ok") {
         const settings = asRecord(parseTolerantJson(settingsProbe.text));
+        // Stamped whether or not it is listed below: a settings file with no
+        // Copilot keys, or one that does not parse, was still read (X-580).
+        inspect(out, VSCODE_SETTINGS, jsonInspection(settingsProbe.text, settings !== undefined));
         if (settings !== undefined) {
             const copilotKeys = Object.keys(settings)
                 .filter((k) => k.startsWith(COPILOT_CHAT_PREFIX))
@@ -107,7 +111,7 @@ function detect(workspaceRoot) {
         // a PARSE failure on a general-purpose settings file is not a malformed
         // agent config. UNREADABLE (above) is different: S1.14 surfaces it.
     }
-    if (exists(workspaceRoot, AGENTS_FILE)) {
+    if (presentOrRecord(out, workspaceRoot, AGENTS_FILE)) {
         out.reviewedSources.push(AGENTS_FILE);
         out.capabilities.push({
             kind: "agentInstructions",

@@ -108,6 +108,10 @@ export interface EvaluationContext {
     readonly attestation: ConditionAttestationTier;
     /** True when the run has unresolved pin.drift / pin.conflict / baseline.tampered. */
     readonly driftOutstanding: boolean;
+    /** The governed call's arguments, when the evaluating surface holds them
+     * (the gateway does; the workspace review does not). Consumed only by the
+     * `argAtLeast` materiality atom, which FAILS CLOSED when this is absent. */
+    readonly callArgs?: Readonly<Record<string, unknown>> | undefined;
     /**
      * TEAM-ADR-041 (additive, optional): further logical identifiers the SAME
      * action tuple is known by — today the taxonomy classes a signed rule pack
@@ -139,6 +143,8 @@ export interface PolicyDecision {
     readonly matchedRules: readonly MatchedRule[];
     /** POLICY (the winner) — the deciding rule's ref, or null (default-observe). */
     readonly policyRef: PolicyRef | null;
+    /** C03: distinct named approvers the hold needs (require-approval only). */
+    readonly requiredApprovals?: number;
     /** WHY — single-sourced human sentence over the fields above. */
     readonly explanation: string;
 }

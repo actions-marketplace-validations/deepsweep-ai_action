@@ -3,7 +3,7 @@
  *
  * THIS is the product. Every capability that a `deepsweep <verb>` command
  * used to reach is a first-class, individually tested function here, callable
- * over Tauri IPC by the Governance Studio and by the headless sidecar through
+ * over Tauri IPC by the Studio and by the headless sidecar through
  * the same code path — so the two surfaces cannot drift.
  *
  * All functions take an injected `nowIso` where time participates; none reads

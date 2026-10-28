@@ -101,7 +101,7 @@ export declare function readSurfaceSignals(globalObject?: Record<string, unknown
 export declare const ACQUISITION_CTA_IDS: {
     /** "Get the desktop Studio →" — acquires the Tauri desktop app. */
     readonly DESKTOP_STUDIO: "cta-acquire-desktop-studio";
-    /** "Open Governance Studio →" when the desktop app is NOT installed. */
+    /** "Open Studio →" when the desktop app is NOT installed. */
     readonly DESKTOP_STUDIO_FROM_IDE: "cta-acquire-desktop-studio-from-ide";
     /** "Add the IDE extension →" — acquires the VS Code / Cursor extension. */
     readonly IDE_EXTENSION: "cta-acquire-ide-extension";
@@ -149,7 +149,7 @@ export interface SurfaceContext {
     /**
      * IDE EXTENSION ONLY. Whether the desktop Studio was detected on this
      * machine by the extension host (an installed-app probe, never a UA
-     * sniff). Drives "Reveal in Studio →" vs "Open Governance Studio →".
+     * sniff). Drives "Reveal in Studio →" vs "Open Studio →".
      * Omitted → false, i.e. assume NOT installed, which is the honest default
      * and the one that offers the user the acquisition path.
      */

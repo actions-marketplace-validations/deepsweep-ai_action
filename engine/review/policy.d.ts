@@ -105,6 +105,16 @@ export type ConditionAtom = {
     readonly attestationAtMost: ConditionAttestationTier;
 } | {
     readonly driftOutstanding: true;
+}
+/** The materiality condition (2026-09-17 audit, C04): the rule applies
+ * unless the named call argument PROVES itself below the threshold. Absent
+ * or non-numeric values hold the rule — fail closed, or omitting the
+ * amount key would bypass the threshold. */
+ | {
+    readonly argAtLeast: {
+        readonly key: string;
+        readonly value: number;
+    };
 };
 /**
  * Action matchers. Both variants admit an exact vocabulary word or a trailing
@@ -148,6 +158,10 @@ export interface NarrowingRule extends RuleExplainability {
     readonly action: NarrowingActionMatcher;
     readonly resource: string;
     readonly condition?: readonly ConditionAtom[];
+    /** Dual authorization (2026-09-17 audit, C03): how many DISTINCT named
+     * approvers a require-approval hold needs before it is granted. Only legal
+     * on the require-approval variant; 1 is the implicit default. */
+    readonly approvals?: number;
 }
 export type PolicyRule = AllowRule | NarrowingRule;
 /** Operator surface (ADR-021): rollout mode. `observe` computes + ledgers

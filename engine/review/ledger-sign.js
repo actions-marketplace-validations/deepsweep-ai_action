@@ -32,7 +32,7 @@
  * WHERE THE KEY LIVES
  * -------------------
  * OUTSIDE agent-readable paths. The documented default is the OS KEYCHAIN,
- * supplied by the desktop Governance Studio, which owns keychain integration.
+ * supplied by the desktop Studio, which owns keychain integration.
  * This engine has ZERO third-party runtime dependencies and node:crypto has no
  * keychain binding, so the engine does NOT reach the keychain: it defines the
  * injection seam (`LedgerSigningKey`) and the host supplies a signer.
@@ -53,8 +53,8 @@
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { canonicalize } from "./canonical.js";
 import { keyIdFor } from "./bundle.js";
-import { appendStoreLine, readStoreText } from "./store.js";
-import { GENESIS_PREV, ledgerTreeHead, verifyChain } from "./ledger.js";
+import { appendStoreLine, readStoreFile } from "./store.js";
+import { GENESIS_PREV, LEDGER_MAX_BYTES, ledgerTreeHead, verifyChain, withLedgerLock } from "./ledger.js";
 import { verifyTreeHead } from "../evidence/treehead.js";
 export const LEDGER_SIG_FILE = "ledger-sig.jsonl";
 export const LEDGER_SIG_SCHEMA_VERSION = 1;
@@ -88,12 +88,12 @@ export function describeKeySource(key) {
             provider: "unavailable",
             keyId: null,
             detail: "No ledger signing key is available, so new entries are recorded UNSIGNED. The key is held outside " +
-                "agent-readable paths — by default in the OS keychain, supplied by the Governance Studio — and the " +
+                "agent-readable paths — by default in the OS keychain, supplied by the Studio — and the " +
                 "engine never reads key material from the workspace store.",
         };
     }
     const where = key.provider === "os-keychain"
-        ? "the OS keychain (supplied by the Governance Studio)"
+        ? "the OS keychain (supplied by the Studio)"
         : "the host process (injected; never read from the workspace store)";
     return {
         available: true,
@@ -118,18 +118,28 @@ export function signLedger(entries, key) {
     return entries.map((e) => signLedgerEntry(e, key));
 }
 /** Append one signature line to the sidecar (contained, O(1), same discipline
- * as the ledger append itself). */
+ * as the ledger append itself). It holds the ledger lock (re-entrant, so free
+ * inside a gateway decision), and a write that fails part-way is rolled back
+ * (TEAM-ADR-069 fix pass 2, M-4): a torn signature line made the whole
+ * sidecar unreadable, so every signature, not one, stopped verifying. If a
+ * torn line could not be rolled back, the next signature starts on a new
+ * line, so it is not glued onto the torn one (fix pass 3, R3-4). */
 export function appendLedgerSignature(workspaceRoot, sig) {
-    appendStoreLine(workspaceRoot, LEDGER_SIG_FILE, `${JSON.stringify(sig)}\n`, refuse);
+    withLedgerLock(workspaceRoot, () => appendStoreLine(workspaceRoot, LEDGER_SIG_FILE, `${JSON.stringify(sig)}\n`, refuse, { rollBackOnFailure: true, startOnNewLine: true }), refuse);
 }
 /** Parse the sidecar. Malformed -> undefined (never a partial, never a throw
- * outside containment violations) so the caller can refuse loudly. */
+ * outside containment violations) so the caller can refuse loudly. A sidecar
+ * that exists but cannot be read (over LEDGER_MAX_BYTES, or a read error) is
+ * undefined too, never "no signatures": read as empty, a signed ledger would
+ * downgrade to "unsigned" in silence (TEAM-ADR-069). Absent -> []. */
 export function readLedgerSignatures(workspaceRoot) {
-    const text = readStoreText(workspaceRoot, LEDGER_SIG_FILE, refuse);
-    if (text === undefined)
+    const r = readStoreFile(workspaceRoot, LEDGER_SIG_FILE, refuse, LEDGER_MAX_BYTES);
+    if (r.status === "absent")
         return [];
+    if (r.status === "unreadable")
+        return undefined;
     const out = [];
-    for (const line of text.split("\n")) {
+    for (const line of r.text.split("\n")) {
         if (line.trim() === "")
             continue;
         let parsed;

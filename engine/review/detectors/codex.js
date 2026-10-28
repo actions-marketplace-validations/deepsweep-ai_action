@@ -11,7 +11,7 @@
 import { probeRead, probeReadUser } from "../read.js";
 import { emptyResult } from "./detector.js";
 import { tomlMcpServerNames, tomlTopLevelString } from "./family.js";
-import { isBlankDocument, unreadableWarning } from "./util.js";
+import { inspect, isBlankDocument, textInspection, unreadableWarning } from "./util.js";
 const TOOL = "Codex";
 const PROJECT_CONFIG = ".codex/config.toml";
 const USER_CONFIG_REL = ".codex/config.toml";
@@ -19,11 +19,14 @@ const USER_CONFIG_LABEL = "~/.codex/config.toml";
 function reviewToml(probe, source, out, scope) {
     if (probe.status === "unreadable") {
         out.warnings.push(unreadableWarning(source, probe.reason));
+        inspect(out, source, "unreadable", scope, probe.reason);
         return;
     }
     if (probe.status !== "ok")
         return;
     out.reviewedSources.push(source);
+    // TOML is matched line by line; the document is never parsed.
+    inspect(out, source, textInspection(probe.text), scope);
     if (isBlankDocument(probe.text))
         return;
     const reach = scope === "user" ? " in EVERY project" : "";

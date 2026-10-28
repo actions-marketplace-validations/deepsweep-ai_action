@@ -22,7 +22,7 @@
  */
 import { parseTolerantJson, probeDirNames, probeRead, probeReadUser } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { dirNamesOrWarn, isBlankDocument, malformedWarning, mcpCredentialDetail, mcpServersFrom, nameList, unreadableWarning, visibleNames, } from "./util.js";
+import { asRecord, directoryUnreadableWarning, dirNamesOrWarn, inspect, isBlankDocument, jsonInspection, malformedWarning, mcpCredentialDetail, mcpServersFrom, nameList, unreadableWarning, visibleNames, } from "./util.js";
 import { countNoun } from "../text.js";
 const RULES_DIR = ".trae/rules";
 const MCP_CONFIG = ".trae/mcp.json";
@@ -70,7 +70,7 @@ function emitMcpCapabilities(json, source, out, scope) {
 function detect(workspaceRoot, ctx) {
     const out = emptyResult();
     // --- workspace rules -----------------------------------------------------
-    const ruleFiles = visibleNames(dirNamesOrWarn(workspaceRoot, RULES_DIR, out.warnings));
+    const ruleFiles = visibleNames(dirNamesOrWarn(workspaceRoot, RULES_DIR, out));
     if (ruleFiles.length > 0) {
         out.reviewedSources.push(RULES_DIR);
         out.capabilities.push({
@@ -87,10 +87,12 @@ function detect(workspaceRoot, ctx) {
     const mcpProbe = probeRead(workspaceRoot, MCP_CONFIG);
     if (mcpProbe.status === "unreadable") {
         out.warnings.push(unreadableWarning(MCP_CONFIG, mcpProbe.reason));
+        inspect(out, MCP_CONFIG, "unreadable", "workspace", mcpProbe.reason);
     }
     else if (mcpProbe.status === "ok") {
         out.reviewedSources.push(MCP_CONFIG);
         const json = parseTolerantJson(mcpProbe.text);
+        inspect(out, MCP_CONFIG, jsonInspection(mcpProbe.text, asRecord(json) !== undefined), "workspace");
         if (json === undefined) {
             // An empty file is nothing configured, not malformed — the guard
             // nests here so the else-branch keeps its type narrowing.
@@ -109,10 +111,12 @@ function detect(workspaceRoot, ctx) {
         : { status: "absent" };
     if (userMcp.status === "unreadable") {
         out.warnings.push(unreadableWarning(USER_MCP_LABEL, userMcp.reason));
+        inspect(out, USER_MCP_LABEL, "unreadable", "user", userMcp.reason);
     }
     else if (userMcp.status === "ok") {
         out.reviewedSources.push(USER_MCP_LABEL);
         const json = parseTolerantJson(userMcp.text);
+        inspect(out, USER_MCP_LABEL, jsonInspection(userMcp.text, asRecord(json) !== undefined), "user");
         if (json === undefined) {
             // An empty file is nothing configured, not malformed — the guard
             // nests here so the else-branch keeps its type narrowing.
@@ -127,9 +131,11 @@ function detect(workspaceRoot, ctx) {
     if (ctx.userConfigRoot !== undefined) {
         const probe = probeDirNames(ctx.userConfigRoot, USER_RULES_REL);
         if (probe.status === "unreadable") {
-            out.warnings.push(unreadableWarning(USER_RULES_LABEL, probe.reason));
+            out.warnings.push(directoryUnreadableWarning(USER_RULES_LABEL, probe.reason));
+            inspect(out, USER_RULES_LABEL, "unreadable", "user", probe.reason);
         }
         else if (probe.status === "ok") {
+            inspect(out, USER_RULES_LABEL, probe.truncated ? "listed_partial" : "listed", "user");
             const names = visibleNames(probe.names);
             if (names.length > 0) {
                 out.reviewedSources.push(USER_RULES_LABEL);

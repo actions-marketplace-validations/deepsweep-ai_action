@@ -1,6 +1,7 @@
 import type { ArgCredentialHit } from "./credentials.js";
 import type { UnreadableReason } from "../read.js";
-import type { ReviewWarning } from "../types.js";
+import type { ReviewWarning, SourceInspectionStatus } from "../types.js";
+import type { DetectorResult } from "./detector.js";
 export declare function asRecord(v: unknown): Record<string, unknown> | undefined;
 export declare function asString(v: unknown): string | undefined;
 /**
@@ -36,6 +37,29 @@ export declare function malformedWarning(source: string): ReviewWarning;
  * Never file content, and never a guess at what the capabilities might be.
  */
 export declare function unreadableWarning(source: string, reason: UnreadableReason): ReviewWarning;
+/** The same warning for a DIRECTORY that could not be enumerated (TEAM-ADR-072 code). */
+export declare function directoryUnreadableWarning(source: string, reason: UnreadableReason): ReviewWarning;
+export type InspectionScope = "workspace" | "user";
+/**
+ * Stamp how far one source was inspected, at the read itself (TEAM-ADR-072).
+ * Metadata only: it never changes what the detector reports, and the engine
+ * keeps the strongest limitation when a source is observed more than once.
+ */
+export declare function inspect(out: DetectorResult, source: string, status: SourceInspectionStatus, scope?: InspectionScope, reason?: UnreadableReason): void;
+/**
+ * A presence-only check that records what it saw (TEAM-ADR-072, X-583): present
+ * is "presence_only", a refusal is "unreadable" with its reason, and absence
+ * (or the wrong inode type) records nothing. Returns what `exists` returned.
+ */
+export declare function presentOrRecord(out: DetectorResult, root: string, rel: string, expect?: "file" | "directory"): boolean;
+/**
+ * A structured JSON reader's verdict: "parsed" only when the document parsed
+ * to the object it expects; a blank document is "blank" (nothing configured);
+ * anything else is "parse_failed", whether or not the detector warns about it.
+ */
+export declare function jsonInspection(text: string, parsedAsObject: boolean): SourceInspectionStatus;
+/** A text pattern reader's verdict: read, but never structurally parsed. */
+export declare function textInspection(text: string): SourceInspectionStatus;
 /**
  * Directory listing that cannot silently lose evidence.
  *
@@ -48,7 +72,9 @@ export declare function unreadableWarning(source: string, reason: UnreadableReas
  * Warnings are deduplicated by source so a nested walk cannot emit the same
  * path twice.
  */
-export declare function dirNamesOrWarn(workspaceRoot: string, relPath: string, warnings: ReviewWarning[]): string[];
+export declare function dirNamesOrWarn(workspaceRoot: string, relPath: string, out: DetectorResult, opts?: {
+    readonly fileIsAnEntry?: boolean;
+}): string[];
 export interface McpServerEntry {
     /** Number of launch args (shape only — arg contents never leave util). */
     argCount?: number;

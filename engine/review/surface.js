@@ -104,7 +104,7 @@ export function readSurfaceSignals(globalObject = {}) {
 export const ACQUISITION_CTA_IDS = {
     /** "Get the desktop Studio →" — acquires the Tauri desktop app. */
     DESKTOP_STUDIO: "cta-acquire-desktop-studio",
-    /** "Open Governance Studio →" when the desktop app is NOT installed. */
+    /** "Open Studio →" when the desktop app is NOT installed. */
     DESKTOP_STUDIO_FROM_IDE: "cta-acquire-desktop-studio-from-ide",
     /** "Add the IDE extension →" — acquires the VS Code / Cursor extension. */
     IDE_EXTENSION: "cta-acquire-ide-extension",

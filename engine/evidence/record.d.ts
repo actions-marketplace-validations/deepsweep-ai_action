@@ -42,6 +42,13 @@ export interface EvidenceRecordInput {
     /** Required for reason "review-run", must be null otherwise — enforced by
      * the constructor because JSON Schema cannot express the coupling. */
     readonly review: EvidenceReviewFacts | null;
+    /** For reason "ledger-event" only: the entry's kind IN CLEAR (C12,
+     * 2026-09-17). The kind is public engine vocabulary — never customer
+     * content — and without it a kill-switch drill exports as an anonymous
+     * hash nobody can point an auditor at. Absent on decision/review records
+     * (their identity lives in the hashed tuple), and absent fields do not
+     * canonicalize, so pre-existing golden vectors are byte-identical. */
+    readonly eventKind?: string;
 }
 export interface EvidenceRecord {
     readonly schemaVersion: typeof EVIDENCE_SCHEMA_VERSION;
@@ -58,6 +65,8 @@ export interface EvidenceRecord {
     readonly policyLayers: readonly string[];
     readonly matchedRuleCount: number;
     readonly review: EvidenceReviewFacts | null;
+    /** See EvidenceRecordInput.eventKind — present only on ledger-event records. */
+    readonly eventKind?: string;
 }
 /** Build the record — the ONLY place raw tuple values are touched.
  *

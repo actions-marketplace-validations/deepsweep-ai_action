@@ -85,7 +85,10 @@ as a pass.
 Yes — it is an ordinary action. `on: schedule` works, as does `workflow_dispatch`.
 
 **Does it work on self-hosted runners?**
-Yes. It needs a filesystem and Node; it makes no outbound calls of its own.
+Yes. It needs a filesystem and Node. The review itself makes no network calls. The one
+request the action makes is for the public security bulletins file described below, and
+`bulletins: false` turns it off. Without network access it waits at most 5 seconds and
+moves on.
 
 ---
 
@@ -116,6 +119,7 @@ jobs:
 | `path` | `.` | directory to review |
 | `fail-below-score` | *(none)* | fail the check when posture is below this number (0–100). Omit to report without blocking. |
 | `comment-on-pr` | `true` | post the result as a PR comment (updated in place, never appended) |
+| `bulletins` | `true` | show a critical security bulletin when it covers something this repository uses. Never fails the job. `false` makes no request. |
 | `api-key` | *(none)* | optional, for authenticated features |
 | `fail-on-grade` | *(none)* | **deprecated.** DeepSweep scores posture 0–100 and issues no letter grade. Setting it fails the run rather than passing a gate that cannot be evaluated. Use `fail-below-score`. |
 
@@ -147,6 +151,30 @@ Below 70, the check fails. At or above it, the comment still posts.
 If no agent configuration is found to review, the check **fails rather than passes** — a
 gate that cannot be evaluated is never treated as a pass.
 
+### Security bulletins
+
+When DeepSweep publishes a critical security bulletin, the action shows it on the runs it
+applies to, for 30 days after publication. A bulletin applies when the repository uses
+what it covers. For PHP that means a `composer.json` or `.php-version` file, or a
+Dockerfile built `FROM` a `php` image, at the top level or one folder down.
+
+You get one block in the job summary and one notice on the run, each with the title, the
+fix and a link to the full bulletin with its sources. Bulletin text is shown as plain
+text on one line, and the only links it can carry point to deepsweep.ai. A repository the
+bulletin does not cover sees nothing.
+
+It never fails the job. If the file cannot be fetched within 5 seconds, or the response
+is anything other than the version 1 document the action expects, the step prints nothing
+about bulletins and the run carries on exactly as it would have without it, so a slow or
+offline runner loses at most those 5 seconds. It also runs after a failed
+`fail-below-score` gate.
+
+```yaml
+      - uses: deepsweep-ai/action@v1
+        with:
+          bulletins: false   # never fetch bulletins
+```
+
 ---
 
 ## How it runs — and what leaves your runner
@@ -154,6 +182,11 @@ gate that cannot be evaluated is never treated as a pass.
 **Nothing.** The review executes entirely on the GitHub runner using an engine bundled
 inside this action. No source, no diff, no file contents, and no repository name are
 transmitted anywhere.
+
+The only request the action makes is a plain download of
+`https://deepsweep.ai/advisories/v1/feed.json`, the public list of DeepSweep security
+bulletins. It carries nothing about your repository. Set `bulletins: false` and it is not
+made at all.
 
 There is no `pip install`, no `npm install -g`, and nothing placed on `PATH`. The action
 executes the **same engine binary the DeepSweep Governance Studio desktop app runs**, so a

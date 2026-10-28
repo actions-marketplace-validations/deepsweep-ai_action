@@ -9,10 +9,10 @@
  * config root, so they are deliberately NOT reviewed (ADR-014 reads only the
  * injected root). AGENTS.md is left to the copilot detector (no double count).
  */
-import { exists, probeRead } from "../read.js";
+import { probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
 import { reviewRulesDir } from "./family.js";
-import { unreadableWarning } from "./util.js";
+import { inspect, presentOrRecord, unreadableWarning } from "./util.js";
 const TOOL = "Cline";
 const RULES_PATH = ".clinerules";
 const IGNORE_FILE = ".clineignore";
@@ -23,6 +23,8 @@ function detect(workspaceRoot) {
     const asFile = probeRead(workspaceRoot, RULES_PATH);
     if (asFile.status === "ok") {
         out.reviewedSources.push(RULES_PATH);
+        // Read, but its instruction text is never inspected.
+        inspect(out, RULES_PATH, "presence_only");
         out.capabilities.push({
             kind: "agentInstructions",
             summary: "Cline rules file auto-applies workspace instructions to agent sessions",
@@ -39,8 +41,9 @@ function detect(workspaceRoot) {
     }
     else if (asFile.status === "unreadable") {
         out.warnings.push(unreadableWarning(RULES_PATH, asFile.reason));
+        inspect(out, RULES_PATH, "unreadable", "workspace", asFile.reason);
     }
-    if (exists(workspaceRoot, IGNORE_FILE)) {
+    if (presentOrRecord(out, workspaceRoot, IGNORE_FILE)) {
         out.reviewedSources.push(IGNORE_FILE);
         out.protections.push({
             constrains: "repositoryWrite",

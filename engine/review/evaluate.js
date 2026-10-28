@@ -60,6 +60,21 @@ function atomHolds(atom, ctx) {
     if ("attestationAtMost" in atom) {
         return ATTESTATION_ORDER[ctx.attestation] <= ATTESTATION_ORDER[atom.attestationAtMost];
     }
+    if ("argAtLeast" in atom) {
+        // MATERIALITY FAILS CLOSED (C04): the narrowing rule applies unless the
+        // named argument PROVES itself IMMATERIAL. An absent key, a string, NaN,
+        // or an absent args object all hold the rule — otherwise an agent omits
+        // or renames the amount field and walks under the bar.
+        //
+        // MAGNITUDE, NOT SIGN (2026-09-19 audit). The comparison used to be
+        // `v < value`, so a refund of -1_000_000 proved itself "below" a 500
+        // threshold, the rule dropped, and a reversal of any size walked under a
+        // materiality gate — the exact movement the control exists to catch.
+        // Materiality is a size, and a large credit is as material as a large
+        // debit, so immateriality is |v| < threshold. Zero remains immaterial.
+        const v = ctx.callArgs?.[atom.argAtLeast.key];
+        return !(typeof v === "number" && Number.isFinite(v) && Math.abs(v) < atom.argAtLeast.value);
+    }
     return ctx.driftOutstanding === true;
 }
 /**
@@ -150,6 +165,9 @@ export function evaluate(policySet, ctx) {
     const winner = matchedRules[0];
     const outcome = winner.effect;
     const decidingRule = effective.find((rule) => rule.name === winner.name);
+    const requiredApprovals = outcome === "require-approval" && "approvals" in decidingRule && typeof decidingRule.approvals === "number"
+        ? decidingRule.approvals
+        : undefined;
     return {
         principal: ctx.principal,
         action: ctx.action,
@@ -158,6 +176,7 @@ export function evaluate(policySet, ctx) {
         outcome,
         matchedRules,
         policyRef: winner.policyRef,
+        ...(requiredApprovals !== undefined ? { requiredApprovals } : {}),
         explanation: buildExplanation(outcome, ctx, matchedRules, winner.name),
     };
 }

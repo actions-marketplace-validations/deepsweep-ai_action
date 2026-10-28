@@ -55,6 +55,22 @@ export declare function safeRead(workspaceRoot: string, relPath: string): string
  */
 export declare function exists(workspaceRoot: string, relPath: string, expect?: "file" | "directory"): boolean;
 /**
+ * TEAM-ADR-072 (Codex X-583): the classified form of `exists`. It never opens
+ * the file. A containment or stat REFUSAL is reported as such, so a presence
+ * observation is never silently dropped; a path of the wrong inode type is
+ * absent, exactly as `exists` has always treated it (a `.git` FILE in a
+ * worktree is not a repository).
+ */
+export type PresenceResult = {
+    status: "present";
+} | {
+    status: "absent";
+} | {
+    status: "refused";
+    reason: "escaping-symlink" | "io-error";
+};
+export declare function probePresence(workspaceRoot: string, relPath: string, expect?: "file" | "directory"): PresenceResult;
+/**
  * ADR-014 — user-scope config reads (e.g. ~/.codeium/windsurf/mcp_config.json).
  * Identical invariants to the workspace readers, anchored at an EXPLICIT
  * user-config root instead of the workspace: allowlisted relative paths
@@ -81,9 +97,12 @@ export declare const MAX_DIR_ENTRIES = 200;
  *
  * Absence and refusal are different facts and are now reported as such.
  */
-export type DirProbeResult = {
+export type DirProbeResult = 
+/** `truncated`: more than MAX_DIR_ENTRIES entries existed; `names` holds the first ones. */
+{
     status: "ok";
     names: string[];
+    truncated: boolean;
 } | {
     status: "absent";
 } | {

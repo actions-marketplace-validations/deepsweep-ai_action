@@ -4,7 +4,7 @@
  * never secret values (ADR-002).
  */
 import { firstUrlArgIndex, isCleartextHttpUrl, reviewArgsForCredentials } from "./credentials.js";
-import { probeDirNames } from "../read.js";
+import { probeDirNames, probePresence } from "../read.js";
 export function asRecord(v) {
     return typeof v === "object" && v !== null && !Array.isArray(v)
         ? v
@@ -42,6 +42,7 @@ export function isBlankDocument(text) {
 export function malformedWarning(source) {
     return {
         source,
+        code: "malformed",
         summary: `Configuration in ${source} is malformed or unrecognized — reviewed for presence only. Fix the file and re-run the review for full capability coverage.`,
     };
 }
@@ -62,8 +63,49 @@ const UNREADABLE_REASON_LABEL = {
 export function unreadableWarning(source, reason) {
     return {
         source,
+        code: "unreadable",
+        reason,
         summary: `Configuration at ${source} exists but could not be read (${UNREADABLE_REASON_LABEL[reason]}) — its capabilities are missing from this review. Restore read access and re-run the review; missing evidence is not missing capability.`,
     };
+}
+/** The same warning for a DIRECTORY that could not be enumerated (TEAM-ADR-072 code). */
+export function directoryUnreadableWarning(source, reason) {
+    return { ...unreadableWarning(source, reason), code: "directory-unreadable" };
+}
+/**
+ * Stamp how far one source was inspected, at the read itself (TEAM-ADR-072).
+ * Metadata only: it never changes what the detector reports, and the engine
+ * keeps the strongest limitation when a source is observed more than once.
+ */
+export function inspect(out, source, status, scope = "workspace", reason) {
+    out.inspections.push({ source, scope, status, ...(reason !== undefined ? { reason } : {}) });
+}
+/**
+ * A presence-only check that records what it saw (TEAM-ADR-072, X-583): present
+ * is "presence_only", a refusal is "unreadable" with its reason, and absence
+ * (or the wrong inode type) records nothing. Returns what `exists` returned.
+ */
+export function presentOrRecord(out, root, rel, expect = "file") {
+    const p = probePresence(root, rel, expect);
+    if (p.status === "present")
+        inspect(out, rel, "presence_only");
+    else if (p.status === "refused")
+        inspect(out, rel, "unreadable", "workspace", p.reason);
+    return p.status === "present";
+}
+/**
+ * A structured JSON reader's verdict: "parsed" only when the document parsed
+ * to the object it expects; a blank document is "blank" (nothing configured);
+ * anything else is "parse_failed", whether or not the detector warns about it.
+ */
+export function jsonInspection(text, parsedAsObject) {
+    if (parsedAsObject)
+        return "parsed";
+    return isBlankDocument(text) ? "blank" : "parse_failed";
+}
+/** A text pattern reader's verdict: read, but never structurally parsed. */
+export function textInspection(text) {
+    return isBlankDocument(text) ? "blank" : "pattern_match";
 }
 /**
  * Directory listing that cannot silently lose evidence.
@@ -77,15 +119,24 @@ export function unreadableWarning(source, reason) {
  * Warnings are deduplicated by source so a nested walk cannot emit the same
  * path twice.
  */
-export function dirNamesOrWarn(workspaceRoot, relPath, warnings) {
+export function dirNamesOrWarn(workspaceRoot, relPath, out, opts = {}) {
     const probe = probeDirNames(workspaceRoot, relPath);
+    // A walk that probes every entry of a listing for children meets plain files
+    // as a matter of course: for it, "not a directory" is a file entry, not a
+    // source that could not be read. Every other refusal still warns.
+    if (probe.status === "unreadable" && probe.reason === "not-a-file" && opts.fileIsAnEntry === true)
+        return [];
     if (probe.status === "unreadable") {
-        if (!warnings.some((w) => w.source === relPath)) {
-            warnings.push(unreadableWarning(relPath, probe.reason));
+        if (!out.warnings.some((w) => w.source === relPath)) {
+            out.warnings.push(directoryUnreadableWarning(relPath, probe.reason));
         }
+        inspect(out, relPath, "unreadable", "workspace", probe.reason);
         return [];
     }
-    return probe.status === "ok" ? probe.names : [];
+    if (probe.status !== "ok")
+        return [];
+    inspect(out, relPath, probe.truncated ? "listed_partial" : "listed");
+    return probe.names;
 }
 /**
  * The ADR-013 credential/transport fragment for one MCP server, flattened into

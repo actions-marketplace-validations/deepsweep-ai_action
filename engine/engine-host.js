@@ -3,7 +3,7 @@
  * DeepSweep headless engine host — INTERNAL COMPONENT, NOT A USER INTERFACE.
  *
  * Two consumers, both of which BUNDLE this artifact rather than install it:
- *   (a) the Governance Studio desktop app, which spawns it as a sidecar;
+ *   (a) the Studio desktop app, which spawns it as a sidecar;
  *   (b) the CI runner, which executes the same file.
  * It is never placed on PATH, never symlinked, and never documented as a
  * command a person types.

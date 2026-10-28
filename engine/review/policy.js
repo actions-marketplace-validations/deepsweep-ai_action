@@ -1,7 +1,7 @@
 import { canonicalize, sha256Hex } from "./canonical.js";
 import { parseTrustConfig, verifyBundle } from "./bundle.js";
-import { readStoreText, STORE_DIR, writeStoreAtomic } from "./store.js";
-import { safeReadUser } from "./read.js";
+import { readStoreFile, readStoreText, STORE_DIR, writeStoreAtomic } from "./store.js";
+import { probeReadUser } from "./read.js";
 import { sanitizeField } from "./sanitize.js";
 import { selfProtectionOverrideAttempts, selfProtectionRefusalReason } from "./self-protect.js";
 import { loadPacks } from "../packs/load.js";
@@ -232,6 +232,18 @@ function conditionAtomError(atom) {
             ? undefined
             : "driftOutstanding must be the literal true";
     }
+    if (key === "argAtLeast") {
+        const v = atom["argAtLeast"];
+        if (!isPlainObject(v))
+            return "argAtLeast must be an object { key, value }";
+        if (typeof v["key"] !== "string" || v["key"].length === 0)
+            return "argAtLeast.key must be a non-empty string";
+        if (typeof v["value"] !== "number" || !Number.isFinite(v["value"]))
+            return "argAtLeast.value must be a finite number";
+        if (Object.keys(v).length !== 2)
+            return "argAtLeast admits exactly { key, value }";
+        return undefined;
+    }
     return `unknown condition atom "${tok(key)}"`;
 }
 const ALLOW_FIELDS = new Set(["effect", "name", "rationale", "principal", "action", "resource"]);
@@ -243,6 +255,7 @@ const NARROWING_FIELDS = new Set([
     "action",
     "resource",
     "condition",
+    "approvals",
 ]);
 const NARROWING_EFFECTS = new Set(["deny", "require-approval", "observe"]);
 /** Locator for a rule in reason strings: its name if valid, else its index. */
@@ -307,6 +320,15 @@ function validateRule(value, index, out) {
     const pErr = principalError(value["principal"]);
     if (pErr)
         out.push(`${loc}: ${pErr}`);
+    const approvals = value["approvals"];
+    if (approvals !== undefined) {
+        if (value["effect"] !== "require-approval") {
+            out.push(`${loc}: approvals is only legal on the require-approval variant`);
+        }
+        else if (typeof approvals !== "number" || !Number.isInteger(approvals) || approvals < 1 || approvals > 3) {
+            out.push(`${loc}: approvals must be an integer between 1 and 3`);
+        }
+    }
     const condition = value["condition"];
     if (condition !== undefined) {
         if (!Array.isArray(condition)) {
@@ -483,10 +505,15 @@ export const POLICY_FLOOR_FILE = "policy-version.json";
  * it is metadata (public keys + ids), reviewable and drift-pinnable.
  */
 function loadTrustConfig(workspaceRoot) {
-    const text = readStoreText(workspaceRoot, POLICY_KEYS_FILE, policyRefuse);
-    if (text === undefined)
+    const r = readStoreFile(workspaceRoot, POLICY_KEYS_FILE, policyRefuse);
+    if (r.status === "absent")
         return undefined;
-    return parseTrustConfig(text);
+    // TEAM-ADR-069 fix pass 1 (P1): a pinned trust config that exists but
+    // cannot be read is NOT an absent one. Read as absent, it dropped the
+    // signing requirement, and an unsigned policy.json was accepted.
+    if (r.status === "unreadable")
+        return "unreadable";
+    return parseTrustConfig(r.text);
 }
 /** High-water mark of the last ACCEPTED bundleVersion (0 when absent/torn). */
 function readAcceptedFloor(workspaceRoot) {
@@ -508,9 +535,20 @@ function looksSealed(parsed) {
     return typeof r === "object" && r !== null && "bundle" in r && "signature" in r && "keyId" in r;
 }
 export function loadPolicy(workspaceRoot) {
-    const text = readStoreText(workspaceRoot, POLICY_FILE, policyRefuse);
-    if (text === undefined)
+    const read = readStoreFile(workspaceRoot, POLICY_FILE, policyRefuse);
+    if (read.status === "absent")
         return { status: "absent" };
+    // TEAM-ADR-069 fix pass 1 (P1): a policy.json that exists but cannot be
+    // read (permissions, over the size cap, not a regular file) is a refused
+    // layer, never an absent one. Read as absent, an enforce policy with a deny
+    // or require-approval default fell back to observe mode and allow.
+    if (read.status === "unreadable") {
+        return {
+            status: "invalid",
+            refusal: refuse([`policy.json exists but could not be read (${read.cause}) — refusing the whole set (never fail open)`], POLICY_REL_PATH),
+        };
+    }
+    const text = read.text;
     let parsed;
     try {
         parsed = JSON.parse(text);
@@ -527,10 +565,10 @@ export function loadPolicy(workspaceRoot) {
     // proceeds to schema validation, and the accepted floor advances only
     // after the entire chain succeeds.
     const trust = loadTrustConfig(workspaceRoot);
-    if (trust === "malformed") {
+    if (trust === "malformed" || trust === "unreadable") {
         return {
             status: "invalid",
-            refusal: refuse([`${POLICY_KEYS_REL_PATH} is malformed — signing is unverifiable, refusing the whole set (never fail open)`], POLICY_REL_PATH),
+            refusal: refuse([`${POLICY_KEYS_REL_PATH} ${trust === "malformed" ? "is malformed" : "exists but could not be read"} — signing is unverifiable, refusing the whole set (never fail open)`], POLICY_REL_PATH),
         };
     }
     if (looksSealed(parsed)) {
@@ -666,7 +704,12 @@ export function loadLayeredPolicy(workspaceRoot, opts = {}) {
     // User layer: plain policy only, narrowing only.
     if (opts.userConfigRoot !== undefined) {
         const userSource = "~/.deepsweep/policy.json";
-        const text = safeReadUser(opts.userConfigRoot, `.deepsweep/${POLICY_FILE}`);
+        const probe = probeReadUser(opts.userConfigRoot, `.deepsweep/${POLICY_FILE}`);
+        // Fix pass 1 (P1): a user policy that exists but cannot be read is
+        // reported as a refused layer, not taken for an absent one.
+        if (probe.status === "unreadable")
+            refusals.push({ layer: "user", source: userSource, reasons: [`user policy exists but could not be read (${probe.reason})`] });
+        const text = probe.status === "ok" ? probe.text : undefined;
         if (text !== undefined) {
             let parsed;
             try {

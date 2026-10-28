@@ -1,6 +1,7 @@
 import type { PolicyAction, PolicyMode } from "../review/policy.js";
 import type { PolicyOutcome } from "../review/evaluate.js";
 import type { EnforcementEffect } from "../review/enforce.js";
+import { type LedgerEntry } from "../review/ledger.js";
 import { type LedgerSigningKey } from "../review/ledger-sign.js";
 import { type Classification } from "../packs/bindings.js";
 export interface AuthorizeParams {
@@ -25,6 +26,19 @@ export interface AuthorizeParams {
      * over arguments. Absent = no classification, pre-041 behaviour exactly.
      */
     readonly tool?: AuthorizeToolContext | undefined;
+    /** The governed call's arguments (gateway only). Consumed solely by the
+     * argAtLeast materiality atom, which fails closed when absent. */
+    readonly callArgs?: Readonly<Record<string, unknown>> | undefined;
+    /**
+     * TEAM-ADR-069 fix pass 2 (m-a): what happens when RECORDING this decision
+     * fails with an error. Absent: it is thrown, as before. Present: it is
+     * called instead, with the error and, when the decision's entry IS on the
+     * ledger and only its signature failed, that entry (undefined when the
+     * entry itself was not written); it may rethrow. The gateway passes one, so
+     * a decision the policy made is answered with its own code, and a missing
+     * signature is reported rather than turned into a refusal.
+     */
+    readonly onRecordFailure?: ((error: unknown, written: LedgerEntry | undefined) => void) | undefined;
 }
 export interface AuthorizeToolContext {
     readonly serverName: string;
@@ -50,6 +64,8 @@ export interface AuthorizeResult {
     readonly outcome: PolicyOutcome;
     /** ADR-010 acted-on effect; null in observe mode (computed, never blocking). */
     readonly actedOn: EnforcementEffect | null;
+    /** C03: distinct named approvers a hold needs (require-approval rules). */
+    readonly requiredApprovals?: number;
     readonly refusals: readonly AuthorizeLayerRefusal[];
     /** Whether the metadata-only decision record was appended to the ledger. */
     readonly ledgerAppended: boolean;

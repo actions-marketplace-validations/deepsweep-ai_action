@@ -1,19 +1,25 @@
 import { DETECTORS } from "./detectors/registry.js";
 import { countNoun } from "./text.js";
 import { canonicalize, sha256Hex } from "./canonical.js";
+import { gapRule } from "./gap-rules.js";
+import { mergeInspections } from "./inspections.js";
 export function review(workspaceRoot, opts = {}) {
     const ctx = opts.userConfigRoot !== undefined ? { userConfigRoot: opts.userConfigRoot } : {};
     const capabilities = [];
     const reviewedSources = [];
     const protections = [];
     const warnings = [];
+    const observed = [];
     for (const detector of DETECTORS) {
         const result = detector.detect(workspaceRoot, ctx);
         reviewedSources.push(...result.reviewedSources);
         capabilities.push(...result.capabilities);
         protections.push(...result.protections);
         warnings.push(...result.warnings);
+        for (const inspection of result.inspections)
+            observed.push({ detector: detector.id, inspection });
     }
+    const sourceInspections = mergeInspections(observed, [...reviewedSources, ...warnings.map((w) => w.source)]);
     // F6/ADR-020: assign stable content-hash ids AFTER composition (order
     // fixed by the frozen registry) — duplicates disambiguate by "#n" suffix.
     const seen = new Map();
@@ -29,7 +35,13 @@ export function review(workspaceRoot, opts = {}) {
         // Indices come from idx() over this same array and every element was
         // assigned an id in the loop above — both assertions hold by construction.
         g.relatedCapabilityIds = g.relatedCapabilities.map((i) => capabilities[i].id);
+        // C09/C10 (2026-09-17): every gap is an INFERENCE and every gap points
+        // at the capability rows it derives from -- the lineage chain is
+        // gap -> relatedCapabilityIds -> capability.source, total at assembly.
+        g.claimClass = "inference";
     }
+    for (const c of capabilities)
+        c.claimClass = "fact";
     const critical = boundaryGaps.filter((g) => g.severity === "critical").length;
     const high = boundaryGaps.filter((g) => g.severity === "high").length;
     return {
@@ -40,6 +52,7 @@ export function review(workspaceRoot, opts = {}) {
         boundaryGaps,
         protections,
         warnings,
+        sourceInspections,
         totals: {
             capabilities: capabilities.length,
             boundaryGaps: boundaryGaps.length,
@@ -65,6 +78,7 @@ function deriveBoundaryGaps(capabilities) {
     const broadApprovals = idx(capabilities, (c) => (c.kind === "autoApproval" || c.kind === "shellExecution") && c.detail?.["broad"] === true);
     if (secrets.length > 0 && (shell.length > 0 || mcp.length > 0)) {
         gaps.push({
+            ...gapRule("secrets-with-agent-reach"),
             severity: "critical",
             summary: "Secrets are readable in a workspace where agents hold shell or MCP tool access — exfiltration requires no additional privilege",
             recommendation: "Move secrets to a manager (or agent-excluded path) and require approval for reads of .env* files",
@@ -81,6 +95,7 @@ function deriveBoundaryGaps(capabilities) {
     });
     if (credentialed.length > 0) {
         gaps.push({
+            ...gapRule("mcp-arg-credential"),
             severity: "critical",
             summary: `${countNoun(credentialed.length, "MCP server definition embeds", "MCP server definitions embed")} a static credential pattern in launch arguments reachable by agents`,
             recommendation: "Move credentials out of args into a secret-manager reference (or env indirection), and rotate any value that has already been committed or shared",
@@ -92,6 +107,7 @@ function deriveBoundaryGaps(capabilities) {
     const cleartext = mcp.filter((i) => capabilities[i]?.detail?.["cleartextHttp"] === true);
     if (cleartext.length > 0) {
         gaps.push({
+            ...gapRule("mcp-cleartext-http"),
             severity: "high",
             summary: `${countNoun(cleartext.length, "MCP server speaks", "MCP servers speak")} cleartext HTTP to a non-loopback host`,
             recommendation: "Use https (or an ssh/stdio transport) for every non-loopback MCP endpoint",
@@ -100,6 +116,7 @@ function deriveBoundaryGaps(capabilities) {
     }
     if (broadApprovals.length > 0) {
         gaps.push({
+            ...gapRule("broad-preapproval"),
             severity: "critical",
             summary: "Broad pre-approved permission patterns allow agent actions with no human decision point",
             recommendation: "Replace wildcard allows with narrow, resource-scoped rules plus approval gates",
@@ -108,6 +125,7 @@ function deriveBoundaryGaps(capabilities) {
     }
     if (privileged.length > 0 || socketMounts.length > 0) {
         gaps.push({
+            ...gapRule("container-host-control"),
             severity: "critical",
             summary: "Container configuration grants host-level control (privileged mode or Docker socket) — container isolation is not a boundary for agents",
             recommendation: "Remove privileged flags and Docker-socket mounts, or require approval for container rebuilds and daemon-level actions",
@@ -116,6 +134,7 @@ function deriveBoundaryGaps(capabilities) {
     }
     if (shell.length > 0) {
         gaps.push({
+            ...gapRule("shell-without-approval"),
             severity: "high",
             summary: "Shell execution is available to agents with no configured approval gate",
             recommendation: "Require approval for shell commands outside an allowlist (build/test only)",
@@ -124,6 +143,7 @@ function deriveBoundaryGaps(capabilities) {
     }
     if (repo.length > 0 && shell.length > 0) {
         gaps.push({
+            ...gapRule("repo-write-with-shell"),
             severity: "high",
             summary: "Repository write + shell access combine into unreviewed commit/push capability",
             recommendation: "Require approval for git push and protect default-branch operations",
@@ -135,6 +155,7 @@ function deriveBoundaryGaps(capabilities) {
     const externalDirs = idx(capabilities, (c) => c.kind === "externalDirectoryAccess");
     if (externalDirs.length > 0) {
         gaps.push({
+            ...gapRule("external-directory-access"),
             severity: "medium",
             summary: `${countNoun(externalDirs.length, "additional directory extends", "additional directories extend")} agent file access beyond the workspace boundary`,
             recommendation: "Remove additionalDirectories entries you do not actively need, or scope them to read-only data directories",
@@ -143,6 +164,7 @@ function deriveBoundaryGaps(capabilities) {
     }
     if (plainMounts.length > 0) {
         gaps.push({
+            ...gapRule("container-bind-mount"),
             severity: "medium",
             summary: `${countNoun(plainMounts.length, "container bind mount extends", "container bind mounts extend")} agent file access beyond the workspace`,
             recommendation: "Mount only required paths (read-only where possible); keep home directories and credential stores out of the container",
@@ -151,6 +173,7 @@ function deriveBoundaryGaps(capabilities) {
     }
     if (instructions.length > 0) {
         gaps.push({
+            ...gapRule("unreviewed-agent-instructions"),
             severity: "medium",
             summary: `${countNoun(instructions.length, "auto-applied agent instruction source steers", "auto-applied agent instruction sources steer")} agent behavior with no change review`,
             recommendation: "Review instruction and rule files now, and re-review whenever they change — they alter agent behavior silently",
@@ -159,6 +182,7 @@ function deriveBoundaryGaps(capabilities) {
     }
     if (mcp.length > 0) {
         gaps.push({
+            ...gapRule("mcp-without-tool-policy"),
             severity: "medium",
             summary: `${countNoun(mcp.length, "MCP tool surface has", "MCP tool surfaces have")} no per-tool authorization policy`,
             recommendation: "Define Principal/Action/Resource/Condition rules per MCP server",
@@ -167,6 +191,7 @@ function deriveBoundaryGaps(capabilities) {
     }
     if (ports.length > 0) {
         gaps.push({
+            ...gapRule("forwarded-port"),
             severity: "info",
             summary: `${countNoun(ports.length, "forwarded port exposes", "forwarded ports expose")} container services on the host`,
             recommendation: "Forward only the ports you need and prefer localhost-only binding",

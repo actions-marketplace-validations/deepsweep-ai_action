@@ -1,6 +1,6 @@
 import { parseTolerantJson, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { isBlankDocument, malformedWarning, mcpCredentialDetail, mcpServersFrom, unreadableWarning, } from "./util.js";
+import { asRecord, inspect, isBlankDocument, jsonInspection, malformedWarning, mcpCredentialDetail, mcpServersFrom, unreadableWarning, } from "./util.js";
 const MCP_CONFIG_PATHS = [".mcp.json", ".cursor/mcp.json", ".vscode/mcp.json"];
 function detect(workspaceRoot) {
     const out = emptyResult();
@@ -12,10 +12,12 @@ function detect(workspaceRoot) {
             continue;
         if (probe.status === "unreadable") {
             out.warnings.push(unreadableWarning(rel, probe.reason));
+            inspect(out, rel, "unreadable", "workspace", probe.reason);
             continue;
         }
         out.reviewedSources.push(rel);
         const json = parseTolerantJson(probe.text);
+        inspect(out, rel, jsonInspection(probe.text, asRecord(json) !== undefined));
         if (json === undefined) {
             // An empty file is nothing configured, not malformed — the guard
             // nests here so the else-branch keeps its type narrowing.

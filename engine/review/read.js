@@ -79,11 +79,6 @@ function resolveContainedClassified(rootDir, relPath) {
         return { status: "refused", reason: "io-error" };
     }
 }
-/** Undefined-collapsing view of the classified resolver (presence probes). */
-function resolveContained(rootDir, relPath) {
-    const c = resolveContainedClassified(rootDir, relPath);
-    return c.status === "ok" ? c.real : undefined;
-}
 /** O_NOFOLLOW where the platform provides it (win32 lacks it: 0 = no-op). */
 /* v8 ignore next -- reason: constants.O_NOFOLLOW is defined on every POSIX platform the suite runs on; the fallback exists solely for win32 field use. */
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
@@ -134,15 +129,21 @@ export function safeRead(workspaceRoot, relPath) {
  * repository) — presence capabilities cannot be forged by inode type.
  */
 export function exists(workspaceRoot, relPath, expect = "file") {
-    const real = resolveContained(workspaceRoot, relPath);
-    if (real === undefined)
-        return false;
+    return probePresence(workspaceRoot, relPath, expect).status === "present";
+}
+export function probePresence(workspaceRoot, relPath, expect = "file") {
+    const c = resolveContainedClassified(workspaceRoot, relPath);
+    if (c.status === "absent")
+        return { status: "absent" };
+    if (c.status === "refused")
+        return { status: "refused", reason: c.reason };
     try {
-        const st = statSync(real);
-        return expect === "file" ? st.isFile() : st.isDirectory();
+        const st = statSync(c.real);
+        return (expect === "file" ? st.isFile() : st.isDirectory()) ? { status: "present" } : { status: "absent" };
     }
     catch {
-        return false;
+        // Resolved during containment but cannot be stat'ed now (raced or refused): not absence.
+        return { status: "refused", reason: "io-error" };
     }
 }
 /**
@@ -185,7 +186,8 @@ export function probeDirNames(workspaceRoot, relPath) {
         return { status: "unreadable", reason: "io-error" };
     }
     try {
-        return { status: "ok", names: readdirSync(c.real).sort().slice(0, MAX_DIR_ENTRIES) };
+        const all = readdirSync(c.real).sort();
+        return { status: "ok", names: all.slice(0, MAX_DIR_ENTRIES), truncated: all.length > MAX_DIR_ENTRIES };
     }
     catch {
         // EACCES/EPERM land here — the directory EXISTS and we cannot enumerate it.

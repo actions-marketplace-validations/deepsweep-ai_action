@@ -13,7 +13,7 @@
  * bundle (status "unverifiable"), never a partial or fabricated proof set —
  * and never a SIGNED tree head over edited history (TEAM-ADR-046).
  */
-import { readLedger, verifyChain } from "../review/ledger.js";
+import { inspectLedger, isEarlierBuildRestart, ledgerRestartIndex, verifyChain } from "../review/ledger.js";
 import { buildEvidenceRecord, evidenceLeafHash, } from "./record.js";
 import { signTreeHead } from "./treehead.js";
 import { consistencyProof, inclusionProof, merkleRoot, verifyConsistency, verifyInclusion, } from "./merkle.js";
@@ -65,6 +65,7 @@ export function recordFromLedgerEntry(entry, workspace) {
         // review.run entries the tuple slots are empty by construction.
         principal: str("principalHash") === "" ? null : str("principalHash"),
         action: isDecision ? str("actionHash") : entry.kind,
+        ...(!isDecision && entry.kind !== "review.run" ? { eventKind: entry.kind } : {}),
         resource: isDecision ? str("resourceHash") : str("workspace"),
         ruleName: isDecision && str("rule") !== "" ? str("rule") : null,
         policyMode: str("mode") === "" ? "observe" : str("mode"),
@@ -79,14 +80,29 @@ export function recordFromLedgerEntry(entry, workspace) {
  * consistency proof from `sinceSize` when supplied.
  */
 export function exportEvidence(workspaceRoot, opts) {
-    const entries = readLedger(workspaceRoot);
-    if (entries === undefined) {
+    const read = inspectLedger(workspaceRoot);
+    if (read.status !== "ok") {
+        // TEAM-ADR-069: a ledger that exists and cannot be read is refused, never
+        // exported as empty; the reason names why, so an operator looks for the
+        // right fault (a bad line is not the same repair as an oversized file).
         return {
             status: "unverifiable",
-            reason: "ledger.jsonl is malformed — refusing to export proofs over damaged evidence",
+            reason: read.cause === "malformed"
+                ? "ledger.jsonl is malformed — refusing to export proofs over damaged evidence"
+                : `ledger.jsonl could not be read (${read.cause}) — refusing to export proofs over evidence it cannot read`,
         };
     }
+    const entries = read.entries;
     if (!verifyChain(entries)) {
+        // TEAM-ADR-069 fix pass 1 (M3): a ledger an earlier build restarted is
+        // refused all the same, but named for what it is, with the repair.
+        const restart = ledgerRestartIndex(entries);
+        if (restart !== undefined && isEarlierBuildRestart(entries, restart)) {
+            return {
+                status: "unverifiable",
+                reason: `ledger.jsonl was restarted by an earlier DeepSweep version: from entry ${restart} each entry starts a new chain at seq 0, the shape versions before the fix wrote once a ledger passed 1,000,000 bytes — archive ledger.jsonl and ledger-sig.jsonl and start a new ledger`,
+            };
+        }
         // TEAM-ADR-046: exporting (and above all SIGNING) proofs over an edited
         // ledger would attest tampered history — the exact over-claim the moat
         // cannot survive. verifyLedger() names the tamper class for forensics.

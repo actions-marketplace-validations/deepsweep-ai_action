@@ -11,9 +11,10 @@
  * Global MCP settings live in VS Code's globalStorage (outside the injected
  * user root) — not reviewed. AGENTS.md is left to the copilot detector.
  */
-import { exists, probeDirNames } from "../read.js";
+import { probeDirNames } from "../read.js";
 import { emptyResult } from "./detector.js";
 import { reviewPresence, reviewRulesDir, reviewWorkspaceMcpJson, } from "./family.js";
+import { inspect, presentOrRecord } from "./util.js";
 const TOOL = "Roo Code";
 const ROO_DIR = ".roo";
 const RULES_DIR = ".roo/rules";
@@ -30,7 +31,12 @@ function detect(workspaceRoot) {
     });
     // Mode-specific rule dirs: list `.roo/` and take NAMES beginning with "rules-".
     const top = probeDirNames(workspaceRoot, ROO_DIR);
+    // Listed only to find rules-<mode> folders. No warning is raised for it, so
+    // a folder that cannot be listed is recorded as a limitation here.
+    if (top.status === "unreadable")
+        inspect(out, ROO_DIR, "unreadable", "workspace", top.reason);
     if (top.status === "ok") {
+        inspect(out, ROO_DIR, top.truncated ? "listed_partial" : "listed");
         for (const name of top.names.filter((n) => n.startsWith("rules-")).sort()) {
             const rel = `${ROO_DIR}/${name}`;
             const mode = name.slice("rules-".length);
@@ -53,7 +59,7 @@ function detect(workspaceRoot) {
         kind: "agentInstructions",
         summary: "Roo Code custom modes define which tool groups and permissions each mode gets",
     });
-    if (exists(workspaceRoot, IGNORE_FILE)) {
+    if (presentOrRecord(out, workspaceRoot, IGNORE_FILE)) {
         out.reviewedSources.push(IGNORE_FILE);
         out.protections.push({
             constrains: "repositoryWrite",

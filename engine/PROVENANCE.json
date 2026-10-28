@@ -1,7 +1,7 @@
 {
   "_note": "Written by vendor-engine.sh. Compare against the engine source with scripts/check-engine-freshness.sh. Never edit by hand: a stamp you can edit is a stamp that lies.",
-  "sourceCommit": "3349519a8e809b0077fcd8ca65702331541ee359",
-  "sourceCommittedAt": "2026-09-05T18:59:58-04:00",
-  "vendoredAt": "2026-09-05T23:00:52Z",
-  "fileCount": 187
+  "sourceCommit": "5d5198ce428ddd9673e6081b0c287babc71e526a",
+  "sourceCommittedAt": "2026-10-21T18:00:30-04:00",
+  "vendoredAt": "2026-10-22T10:37:16Z",
+  "fileCount": 199
 }

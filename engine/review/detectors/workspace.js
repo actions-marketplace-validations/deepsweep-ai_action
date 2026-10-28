@@ -3,14 +3,14 @@
  * exposure (.env* presence + KEY NAMES ONLY; values never read into reports).
  * Fixed allowlist per ADR-002.
  */
-import { envKeyNames, exists, probeRead } from "../read.js";
+import { envKeyNames, probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
-import { unreadableWarning } from "./util.js";
+import { inspect, presentOrRecord, textInspection, unreadableWarning } from "./util.js";
 import { countNoun } from "../text.js";
 const ENV_PATHS = [".env", ".env.local", ".env.production"];
 function detectGit(workspaceRoot) {
     const out = emptyResult();
-    if (exists(workspaceRoot, ".git", "directory")) {
+    if (presentOrRecord(out, workspaceRoot, ".git", "directory")) {
         out.reviewedSources.push(".git");
         out.capabilities.push({
             kind: "repositoryWrite",
@@ -32,9 +32,12 @@ function detectEnv(workspaceRoot) {
             continue;
         if (probe.status === "unreadable") {
             out.warnings.push(unreadableWarning(rel, probe.reason));
+            inspect(out, rel, "unreadable", "workspace", probe.reason);
             continue;
         }
         out.reviewedSources.push(rel);
+        // Key names are matched line by line; values are never read out.
+        inspect(out, rel, textInspection(probe.text));
         const keys = envKeyNames(probe.text);
         if (keys.length > 0) {
             out.capabilities.push({

@@ -11,10 +11,10 @@
  * The home-directory `.aider.conf.yml` is outside the injected user root's
  * allowlist semantics (it is the home dir itself) and is not reviewed.
  */
-import { exists, probeRead } from "../read.js";
+import { probeRead } from "../read.js";
 import { emptyResult } from "./detector.js";
 import { reviewPresence, yamlTopLevelTrue } from "./family.js";
-import { isBlankDocument, unreadableWarning } from "./util.js";
+import { inspect, isBlankDocument, presentOrRecord, textInspection, unreadableWarning } from "./util.js";
 const CONF = ".aider.conf.yml";
 const MODEL_SETTINGS = ".aider.model.settings.yml";
 const MODEL_METADATA = ".aider.model.metadata.json";
@@ -29,9 +29,12 @@ function detect(workspaceRoot) {
     const conf = probeRead(workspaceRoot, CONF);
     if (conf.status === "unreadable") {
         out.warnings.push(unreadableWarning(CONF, conf.reason));
+        inspect(out, CONF, "unreadable", "workspace", conf.reason);
     }
     else if (conf.status === "ok") {
         out.reviewedSources.push(CONF);
+        // Top-level YAML keys are matched by pattern; the document is never parsed.
+        inspect(out, CONF, textInspection(conf.text));
         out.capabilities.push({
             kind: "agentInstructions",
             summary: "Aider config sets the model, edit format and conventions for agent sessions",
@@ -64,7 +67,7 @@ function detect(workspaceRoot) {
             summary: `Aider model configuration (${rel}) shapes agent sessions in this repository`,
         });
     }
-    if (exists(workspaceRoot, IGNORE_FILE)) {
+    if (presentOrRecord(out, workspaceRoot, IGNORE_FILE)) {
         out.reviewedSources.push(IGNORE_FILE);
         out.protections.push({
             constrains: "repositoryWrite",
@@ -75,7 +78,7 @@ function detect(workspaceRoot) {
     }
     for (const rel of HISTORY_FILES) {
         // PRESENCE ONLY — the file is the one thing a reviewer must not read.
-        if (exists(workspaceRoot, rel)) {
+        if (presentOrRecord(out, workspaceRoot, rel)) {
             out.capabilities.push({
                 kind: "secretsExposure",
                 summary: `Aider conversation history (${rel}) is persisted in the repository tree — anything pasted into a session is at rest here`,

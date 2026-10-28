@@ -37,7 +37,7 @@ export declare function renderJsonValue(value: unknown): string;
  * insignificant whitespace, byte-stable across runs and platforms.
  *
  * This is the ONLY sanctioned producer for the headless engine host's stdout:
- * the sidecar's consumers (the Governance Studio over IPC, and the CI runner)
+ * the sidecar's consumers (the Studio over IPC, and the CI runner)
  * hash and diff that stream, so key order is a contract, not a detail.
  * Added to the sanctioned render set deliberately — see the write-site guard
  * in tests/sanitize.test.ts.

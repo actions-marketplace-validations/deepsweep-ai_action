@@ -7,7 +7,24 @@
  * gates — do not hardcode prices in the UI; read STRIPE_PRICES here.
  */
 export type Tier = "free" | "pro" | "team" | "enterprise";
-export type Feature = "review" | "identity" | "authorization" | "protect" | "auditLocal" | "governanceScore" | "exactLocations" | "oneClickRemediation" | "mcpPinning" | "replay30" | "verifiedBadge" | "teamPolicyBundles" | "delegatedApprovals" | "ciCdGating" | "restApi" | "auditLogs90" | "seats10" | "complianceEvidence" | "ssoScim" | "orgPolicyDistribution" | "replayUnlimited" | "airGap" | "sla" | "dedicatedSupport";
+/**
+ * WHAT IS DELIBERATELY ABSENT, and why it is absent rather than merely unbuilt.
+ *
+ * REPLAY. `replay30` (Pro), `replayUnlimited` (Enterprise) and
+ * `replayRetentionDays` were removed 2026-09-19. Deterministic replay is
+ * STRUCTURALLY IMPOSSIBLE against the evidence record we ship: `record.ts`
+ * hashes principal, action and resource at build time and the v2 schema
+ * declares only the hashed forms, so there is nothing to recompute a decision
+ * from. TEAM-ADR-036 and TEAM-ADR-054 chose that shape on purpose;
+ * ADR-RGOV-007 designed replay and it was never built.
+ *
+ * The flags had ZERO consumers. A priced feature flag with no reader is how an
+ * unsupportable sentence reaches a pricing page: someone greps the tier table,
+ * finds "replay" in Pro, and writes it into a sales asset. Removing the flag
+ * removes the raw material. Restoring replay means a superseding ADR that
+ * changes the record shape FIRST, and the flag comes back after, never before.
+ */
+export type Feature = "review" | "identity" | "authorization" | "protect" | "auditLocal" | "governanceScore" | "exactLocations" | "oneClickRemediation" | "mcpPinning" | "verifiedBadge" | "teamPolicyBundles" | "delegatedApprovals" | "ciCdGating" | "restApi" | "auditLogs90" | "seats10" | "complianceEvidence" | "ssoScim" | "orgPolicyDistribution" | "airGap" | "sla" | "dedicatedSupport";
 export interface StripePrice {
     productId: string;
     monthly: string | null;
@@ -23,7 +40,6 @@ export interface Plan {
     annualCents: number | null;
     seats: number;
     features: Feature[];
-    replayRetentionDays: number;
     popular?: boolean;
     blurb: string;
 }
@@ -32,7 +48,6 @@ export interface Entitlements {
     tier: Tier;
     seats: number;
     features: Set<Feature>;
-    replayRetentionDays: number;
 }
 export declare function entitlementsFor(tier: Tier, seats?: number): Entitlements;
 export declare function isEntitled(e: Entitlements, feature: Feature): boolean;

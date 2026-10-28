@@ -64,6 +64,7 @@ export function buildEvidenceRecord(input) {
         policyLayers: [...input.policyLayers].sort(),
         matchedRuleCount: input.matchedRuleCount,
         review: input.review === null ? null : { ...input.review },
+        ...(input.eventKind !== undefined ? { eventKind: input.eventKind } : {}),
     };
 }
 /** RFC 8785 canonical serialization of a record (the bytes that get hashed). */

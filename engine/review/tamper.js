@@ -1,3 +1,38 @@
+/**
+ * P29 / TEAM-ADR-028 — TAMPER RESPONSE.
+ *
+ * Detection without response is a log line. When the chain, a signature, a
+ * signed tree head or an anchor fails, three things happen atomically here:
+ *
+ *  1. a `ledger:tamper_detected` telemetry event is emitted — METADATA ONLY:
+ *     counts, hashes, classes and derived agent ids. Never a payload value,
+ *     never a path, never file content. This is an ADDITIVE event: nothing
+ *     existing is renamed or removed (the PostHog coverage invariant).
+ *  2. a CRITICAL BoundaryGap is raised, so the tamper appears in the same
+ *     place an operator already looks for missing protection.
+ *  3. the attributed agent is AUTO-QUARANTINED through the ADR-019 lifecycle,
+ *     and its return requires explicit human approval — `transition()` already
+ *     enforces that, and this module never passes `approved` on the agent's
+ *     behalf.
+ *
+ * QUARANTINE EVASION. Quarantining an agentId alone is theatre: ADR-005 ids
+ * are DERIVED, so an agent that changes its derivation inputs gets a new id.
+ * The quarantine MARK therefore records the derivation inputs (agentType +
+ * source), and `checkQuarantineEvasion` treats a NEW id arriving from an
+ * already-quarantined (agentType, source) as the same principal returning
+ * under a new name. Fail-closed: an unknown/forged candidate shape is treated
+ * as evasion.
+ *
+ * Not wired into the review hot path. `runReviewOnce` already raises
+ * `ledger.corrupt` for an unparseable ledger; full chain + signature + head
+ * verification is O(n) hashing and would put an unbounded cost on a path with
+ * a ratified sub-5ms budget (ADR-017). The Studio's "Verify ledger" action and
+ * the headless host call `assessLedger` / `respondToTamper` directly, and
+ * `mergeTamperGap` folds the resulting CRITICAL gap into a report.
+ *
+ * Deterministic: `nowIso` is injected; every emitted list is sorted.
+ */
+import { gapRule } from "./gap-rules.js";
 import { transition } from "../identity/lifecycle.js";
 /** The event name. Frozen: additive, never renamed in place. */
 export const TAMPER_EVENT = "ledger:tamper_detected";
@@ -68,6 +103,7 @@ export function tamperBoundaryGap(a) {
         recommendation: "Treat every action recorded since your last escrowed anchor as unverified. Verify the ledger against that anchor, archive the current file for investigation, re-initialize the ledger, and keep the responsible agent quarantined until you have approved its return.",
         relatedCapabilities: [],
         relatedCapabilityIds: [],
+        ...gapRule("ledger-tamper-detected"),
     };
 }
 /** Fold a tamper gap into a report, keeping the report's own totals honest. */

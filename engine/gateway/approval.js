@@ -24,7 +24,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { canonicalize, sha256Hex } from "../review/canonical.js";
-import { appendLedgerEntry } from "../review/ledger.js";
+import { appendLedgerEntry, withLedgerLock } from "../review/ledger.js";
 import { appendStoreLine, readStoreText } from "../review/store.js";
 import { appendLedgerSignature, signLedgerEntry } from "../review/ledger-sign.js";
 export const APPROVALS_FILE = "approvals.jsonl";
@@ -77,37 +77,138 @@ export function readApprovals(workspaceRoot) {
     }
     return out;
 }
+/**
+ * Append one approval record, holding the ledger lock, and roll a failed
+ * write back (TEAM-ADR-069 fix pass 2, found alongside M-4). A record torn by
+ * a full disk was skipped on read, and so was the NEXT record, which was
+ * appended onto the same line: a lost "consumed" record let one approval be
+ * redeemed a second time. The lock is what makes rolling back safe, because
+ * no other writer that takes it can have appended since (the gateway already
+ * holds it for a whole decision, so this is re-entrant there). If a torn
+ * record could not be rolled back (the truncation failed too), the next record
+ * still starts on a new line, so it is never glued onto the torn one and lost
+ * with it (fix pass 3, R3-4: a lost "consumed" record let a token forward twice).
+ */
 function writeRecord(workspaceRoot, r) {
-    appendStoreLine(workspaceRoot, APPROVALS_FILE, `${JSON.stringify(r)}\n`, refuse);
+    withLedgerLock(workspaceRoot, () => appendStoreLine(workspaceRoot, APPROVALS_FILE, `${JSON.stringify(r)}\n`, refuse, { rollBackOnFailure: true, startOnNewLine: true }), refuse);
 }
 /** Issue a pending token for a denied call. Returns the plaintext token exactly once. */
-export function issueApprovalToken(workspaceRoot, binding, denialEntryHash, nowIso) {
+export function issueApprovalToken(workspaceRoot, binding, denialEntryHash, nowIso, requiredApprovals) {
     const token = randomBytes(18).toString("base64url");
-    writeRecord(workspaceRoot, { ...binding, tokenHash: tokenHashOf(token), status: "pending", denialEntryHash, at: nowIso });
+    const required = typeof requiredApprovals === "number" && Number.isInteger(requiredApprovals) && requiredApprovals > 1 ? requiredApprovals : undefined;
+    writeRecord(workspaceRoot, { ...binding, tokenHash: tokenHashOf(token), status: "pending", denialEntryHash, at: nowIso, ...(required !== undefined ? { required } : {}) });
     return token;
 }
 /** Human approves a pending token. Records `approval.granted` in the ledger (hashes only). */
 export function approveToken(workspaceRoot, token, approver, nowIso, key, ttlMs = DEFAULT_APPROVAL_TTL_MS) {
-    const th = tokenHashOf(token);
+    return approveByHash(workspaceRoot, tokenHashOf(token), approver, nowIso, key, ttlMs);
+}
+/** Pending, unexpired approvals for the approval card. The plaintext token is
+ * never stored, so listing leaks nothing an approver could redeem with -- the
+ * AGENT holds the token; the card only grants the record. */
+export function listPendingApprovals(workspaceRoot, nowIso, ttlMs = DEFAULT_APPROVAL_TTL_MS) {
+    const out = [];
+    for (const [th, r] of readApprovals(workspaceRoot)) {
+        if (r.status !== "pending" || isExpired(r.at, nowIso, ttlMs))
+            continue;
+        const age = Date.parse(nowIso) - Date.parse(r.at);
+        out.push({
+            tokenHash: th,
+            granted: (r.approverHashes ?? []).length,
+            required: r.required ?? 1,
+            principalHash: r.principalHash,
+            actionHash: r.actionHash,
+            resourceHash: r.resourceHash,
+            argsHash: r.argsHash,
+            at: r.at,
+            expiresInMs: Math.max(0, ttlMs - (Number.isFinite(age) ? age : ttlMs)),
+        });
+    }
+    return out;
+}
+/** Grant a pending record by its token hash — the approval-card path
+ * (2026-09-17). SOUND because granting and redeeming are separate powers:
+ * only the agent that received the one-time plaintext token can redeem, so
+ * approving by hash releases exactly the call the denial bound, nothing
+ * else. Same integrity gate as approveToken: a named approver, and never
+ * the denied principal. */
+export function approveByHash(workspaceRoot, th, approver, nowIso, key, ttlMs = DEFAULT_APPROVAL_TTL_MS) {
+    // A grant with no named grantor is not a grant (2026-09-17 audit, C02).
+    // The name is still unauthenticated free text -- the TEAM-ADR-053 limit
+    // stands -- but an EMPTY name can no longer slide through on a default.
+    if (approver.trim().length === 0)
+        return { ok: false, status: "unknown", ledger: null };
     const cur = readApprovals(workspaceRoot).get(th);
     if (cur === undefined)
         return { ok: false, status: "unknown", ledger: null };
     if (cur.status !== "pending")
         return { ok: false, status: cur.status, ledger: null };
+    // Separation of duties, executable form (audit C05): the principal that
+    // was denied cannot be the name that approves the retry. Hash-equality of
+    // unauthenticated names is the honest ceiling until TEAM-ADR-056 ships a
+    // verifier-rooted approver; it stops the lazy self-approval, not a liar.
+    if (cur.principalHash !== undefined && sha256Hex(approverIdentityKey(approver)) === cur.principalHash) {
+        const ledger = appendLedgerEntry(workspaceRoot, "approval.refused_self", { tokenHash: th, denialEntryHash: cur.denialEntryHash, approverHash: sha256Hex(approverIdentityKey(approver)) }, nowIso);
+        if (ledger !== "corrupt" && key !== undefined)
+            appendLedgerSignature(workspaceRoot, signLedgerEntry(ledger, key));
+        return { ok: false, status: "pending", ledger };
+    }
     if (isExpired(cur.at, nowIso, ttlMs)) {
         return { ok: false, status: "revoked", ledger: markRevoked(workspaceRoot, cur, "expired", "ttl", nowIso, key) };
     }
-    const next = { ...cur, status: "approved", approver, at: nowIso };
+    // C03 quorum: distinct named approvers accumulate on the record; the
+    // status flips to approved only when the rule's requirement is met. The
+    // same name cannot count twice (hash membership), and every grant --
+    // including a partial one -- lands on the ledger with its progress.
+    const required = cur.required ?? 1;
+    const aHash = sha256Hex(approverIdentityKey(approver));
+    const have = new Set(cur.approverHashes ?? []);
+    if (have.has(aHash))
+        return { ok: false, status: "pending", ledger: null };
+    have.add(aHash);
+    const granted = have.size;
+    const done = granted >= required;
+    const next = {
+        ...cur,
+        status: done ? "approved" : "pending",
+        approver,
+        at: nowIso,
+        approverHashes: [...have],
+        ...(cur.required !== undefined ? { required: cur.required } : {}),
+    };
     writeRecord(workspaceRoot, next);
-    const ledger = appendLedgerEntry(workspaceRoot, "approval.granted", { tokenHash: th, denialEntryHash: cur.denialEntryHash, approverHash: sha256Hex(approver), resourceHash: cur.resourceHash }, nowIso);
+    const ledger = appendLedgerEntry(workspaceRoot, done ? "approval.granted" : "approval.granted_partial", { tokenHash: th, denialEntryHash: cur.denialEntryHash, approverHash: aHash, resourceHash: cur.resourceHash, granted, required }, nowIso);
     if (ledger !== "corrupt" && key !== undefined)
         appendLedgerSignature(workspaceRoot, signLedgerEntry(ledger, key));
-    return { ok: true, status: "approved", ledger };
+    return { ok: done, status: done ? "approved" : "pending", ledger };
+}
+/**
+ * Canonical form of an approver identity, before hashing.
+ *
+ * THE DEFECT THIS CLOSES (found by the 2026-09-19 claim audit). Quorum
+ * membership hashed `approver.trim()` raw, so ONE person satisfied a 2-of-2
+ * dual-authorization rule by granting twice as "brad" then "Brad". The Set
+ * saw two distinct hashes and flipped the record to approved. Case was the
+ * cheapest bypass; Unicode width and combining forms are the same class
+ * ("ｂrad", "brad" + combining marks), which is why NFKC runs before casing.
+ *
+ * DISPLAY IS UNAFFECTED: the record still stores the string as typed. This
+ * governs IDENTITY COMPARISON only.
+ *
+ * Honest limit, stated rather than implied: this makes one PERSON harder to
+ * count twice under trivially different spellings. It does not authenticate
+ * anyone — the approver remains caller-supplied text (TEAM-ADR-053), and
+ * TEAM-ADR-056's verifier-rooted identity is the real fix. Two people
+ * colluding, or one person using two genuinely different names, is outside
+ * what any normalization can reach.
+ */
+export function approverIdentityKey(approver) {
+    return approver.normalize("NFKC").trim().toLowerCase();
 }
 /** Transition a record to revoked and put the transition on the ledger. */
 function markRevoked(workspaceRoot, cur, reason, revoker, nowIso, key) {
     writeRecord(workspaceRoot, { ...cur, status: "revoked", reason, at: nowIso });
-    const ledger = appendLedgerEntry(workspaceRoot, "approval.revoked", { tokenHash: cur.tokenHash, denialEntryHash: cur.denialEntryHash, revokerHash: sha256Hex(revoker), resourceHash: cur.resourceHash, reason }, nowIso);
+    const ledger = appendLedgerEntry(workspaceRoot, "approval.revoked", { tokenHash: cur.tokenHash, denialEntryHash: cur.denialEntryHash, revokerHash: sha256Hex(approverIdentityKey(revoker)), resourceHash: cur.resourceHash, reason }, nowIso);
     if (ledger !== "corrupt" && key !== undefined)
         appendLedgerSignature(workspaceRoot, signLedgerEntry(ledger, key));
     return ledger;
@@ -147,6 +248,15 @@ export function redeemToken(workspaceRoot, token, binding, nowIso, ttlMs = DEFAU
         return { verdict: "unknown", ledger: null };
     if (cur.status !== "approved")
         return { verdict: "not-approved", ledger: null };
+    // QUORUM IS RE-DERIVED HERE, never trusted from the status field (2026-09-19
+    // audit). `status` is one byte in a file the record's own ADR says an agent
+    // can append to; a record reading "approved" with one hash against a
+    // requirement of two must not redeem. Deny-wins: an absent hash list counts
+    // as zero approvers, so a hand-written record cannot redeem by omission.
+    const requiredAtRedeem = cur.required ?? 1;
+    if ((cur.approverHashes ?? []).length < requiredAtRedeem) {
+        return { verdict: "quorum-unmet", ledger: null };
+    }
     if (isExpired(cur.at, nowIso, ttlMs)) {
         return { verdict: "expired", ledger: markRevoked(workspaceRoot, cur, "expired", "ttl", nowIso, undefined) };
     }
@@ -154,7 +264,15 @@ export function redeemToken(workspaceRoot, token, binding, nowIso, ttlMs = DEFAU
         canonicalize({ p: binding.principalHash, a: binding.actionHash, r: binding.resourceHash, g: binding.argsHash });
     if (!same)
         return { verdict: "binding-mismatch", ledger: null };
-    writeRecord(workspaceRoot, { ...cur, status: "consumed", at: nowIso });
+    // TEAM-ADR-069 fix pass 1 (m2): the ledger entry FIRST, then the store. A
+    // ledger that refuses the entry (or a write that throws) leaves the token
+    // approved, so a call the gateway then refuses has not spent a human's
+    // approval. The residual order risk is stated in TEAM-ADR-069 Addendum 1:
+    // if the store write fails after the entry, approval.consumed is on the
+    // ledger while the token stays approved, and the call is refused.
     const ledger = appendLedgerEntry(workspaceRoot, "approval.consumed", { tokenHash: th, denialEntryHash: cur.denialEntryHash, resourceHash: cur.resourceHash }, nowIso);
+    if (ledger === "corrupt")
+        return { verdict: "unrecorded", ledger };
+    writeRecord(workspaceRoot, { ...cur, status: "consumed", at: nowIso });
     return { verdict: "redeemed", ledger };
 }

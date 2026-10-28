@@ -27,6 +27,10 @@ export interface ApprovalRecord extends ApprovalBinding {
     readonly denialEntryHash: string;
     readonly at: string;
     readonly approver?: string;
+    /** C03 quorum: distinct named approvers required (default 1). */
+    readonly required?: number;
+    /** Hashes of the distinct approver names already granted. */
+    readonly approverHashes?: readonly string[];
     /** For status "revoked": "expired" (TTL) or "revoked" (explicit). */
     readonly reason?: string;
 }
@@ -34,7 +38,7 @@ export declare function tokenHashOf(token: string): string;
 /** Read the store; the LAST record per tokenHash wins (append-only state machine). */
 export declare function readApprovals(workspaceRoot: string): Map<string, ApprovalRecord>;
 /** Issue a pending token for a denied call. Returns the plaintext token exactly once. */
-export declare function issueApprovalToken(workspaceRoot: string, binding: ApprovalBinding, denialEntryHash: string, nowIso: string): string;
+export declare function issueApprovalToken(workspaceRoot: string, binding: ApprovalBinding, denialEntryHash: string, nowIso: string, requiredApprovals?: number): string;
 export interface ApproveResult {
     readonly ok: boolean;
     readonly status: ApprovalStatus | "unknown";
@@ -42,6 +46,50 @@ export interface ApproveResult {
 }
 /** Human approves a pending token. Records `approval.granted` in the ledger (hashes only). */
 export declare function approveToken(workspaceRoot: string, token: string, approver: string, nowIso: string, key?: LedgerSigningKey, ttlMs?: number): ApproveResult;
+/** One pending approval as a card can render it: hashes only, never a plaintext token. */
+export interface PendingApproval {
+    readonly tokenHash: string;
+    readonly granted: number;
+    readonly required: number;
+    readonly principalHash?: string | undefined;
+    readonly actionHash: string;
+    readonly resourceHash: string;
+    readonly argsHash: string;
+    readonly at: string;
+    readonly expiresInMs: number;
+}
+/** Pending, unexpired approvals for the approval card. The plaintext token is
+ * never stored, so listing leaks nothing an approver could redeem with -- the
+ * AGENT holds the token; the card only grants the record. */
+export declare function listPendingApprovals(workspaceRoot: string, nowIso: string, ttlMs?: number): PendingApproval[];
+/** Grant a pending record by its token hash — the approval-card path
+ * (2026-09-17). SOUND because granting and redeeming are separate powers:
+ * only the agent that received the one-time plaintext token can redeem, so
+ * approving by hash releases exactly the call the denial bound, nothing
+ * else. Same integrity gate as approveToken: a named approver, and never
+ * the denied principal. */
+export declare function approveByHash(workspaceRoot: string, th: string, approver: string, nowIso: string, key?: LedgerSigningKey, ttlMs?: number): ApproveResult;
+/**
+ * Canonical form of an approver identity, before hashing.
+ *
+ * THE DEFECT THIS CLOSES (found by the 2026-09-19 claim audit). Quorum
+ * membership hashed `approver.trim()` raw, so ONE person satisfied a 2-of-2
+ * dual-authorization rule by granting twice as "brad" then "Brad". The Set
+ * saw two distinct hashes and flipped the record to approved. Case was the
+ * cheapest bypass; Unicode width and combining forms are the same class
+ * ("ｂrad", "brad" + combining marks), which is why NFKC runs before casing.
+ *
+ * DISPLAY IS UNAFFECTED: the record still stores the string as typed. This
+ * governs IDENTITY COMPARISON only.
+ *
+ * Honest limit, stated rather than implied: this makes one PERSON harder to
+ * count twice under trivially different spellings. It does not authenticate
+ * anyone — the approver remains caller-supplied text (TEAM-ADR-053), and
+ * TEAM-ADR-056's verifier-rooted identity is the real fix. Two people
+ * colluding, or one person using two genuinely different names, is outside
+ * what any normalization can reach.
+ */
+export declare function approverIdentityKey(approver: string): string;
 export interface RevokeResult {
     readonly ok: boolean;
     readonly status: ApprovalStatus | "unknown";
@@ -62,7 +110,8 @@ export interface RevokeResult {
  * ledger already attests, so that returns ok:false rather than a record.
  */
 export declare function revokeToken(workspaceRoot: string, token: string, revoker: string, nowIso: string, key?: LedgerSigningKey): RevokeResult;
-export type RedeemVerdict = "redeemed" | "unknown" | "not-approved" | "binding-mismatch" | "expired";
+/** "unrecorded": the token would redeem, but the ledger refused its approval.consumed entry, so it was NOT consumed (TEAM-ADR-069 fix pass 1, m2). */
+export type RedeemVerdict = "redeemed" | "unknown" | "not-approved" | "binding-mismatch" | "expired" | "quorum-unmet" | "unrecorded";
 /**
  * Consume an approved token on a retry. Single-use; the retry must present the
  * SAME (principal, action, resource, args) tuple the denial recorded, so an
